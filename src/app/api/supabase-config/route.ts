@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
+import { getSupabaseServerConfig } from "@/lib/supabase-env";
 
 export const dynamic = "force-dynamic";
 
 export function GET() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
-  const isConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+  const config = getSupabaseServerConfig();
 
   return NextResponse.json(
     {
-      isConfigured,
-      supabaseUrl: isConfigured ? supabaseUrl : null,
-      supabaseAnonKey: isConfigured ? supabaseAnonKey : null
+      isConfigured: config.isConfigured,
+      missingKeys: config.missingKeys,
+      hasUrl: Boolean(config.supabaseUrl),
+      hasAnonKey: Boolean(config.supabaseAnonKey),
+      supabaseUrl: config.isConfigured ? config.supabaseUrl : null,
+      message: config.isConfigured
+        ? "Supabase接続済みです。"
+        : `Supabase未接続です。不足: ${config.missingKeys.join(", ")}`
     },
     {
       headers: {

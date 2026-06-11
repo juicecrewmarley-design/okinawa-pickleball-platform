@@ -7,7 +7,7 @@ import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
 import { formatLegacyMemberId, generateMemberId, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
-import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import { getSupabaseClient, getSupabaseConfigStatus, isSupabaseConfigured } from "@/lib/supabase";
 import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
 
 const genderOptions: { value: Gender; label: string }[] = [
@@ -28,7 +28,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     setMemberId(generateMemberId());
-    getSupabaseClient().then((client) => setSupabaseReady(Boolean(client)));
+    getSupabaseConfigStatus().then((status) => setSupabaseReady(status.isConfigured));
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -62,6 +62,17 @@ export default function RegisterPage() {
     };
 
     try {
+      const metadata = {
+        full_name: profile.fullName,
+        furigana: profile.furigana,
+        gender: profile.gender,
+        birth_date: profile.birthDate,
+        phone: profile.phone,
+        area: profile.area,
+        residence_scope: profile.residenceScope,
+        municipality: profile.municipality,
+        legacy_member_id: requestedLegacyMemberId || null
+      };
       const supabase = await getSupabaseClient();
 
       if (supabase) {
@@ -69,29 +80,37 @@ export default function RegisterPage() {
           email,
           password,
           options: {
-            data: {
-              full_name: profile.fullName,
-              furigana: profile.furigana,
-              gender: profile.gender,
-              birth_date: profile.birthDate,
-              phone: profile.phone,
-              area: profile.area,
-              residence_scope: profile.residenceScope,
-              municipality: profile.municipality,
-              legacy_member_id: requestedLegacyMemberId || null
-            }
+            data: metadata
           }
         });
 
         if (error) throw error;
 
+        setSupabaseReady(true);
         setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
       } else {
-        window.localStorage.setItem("opba-demo-member", JSON.stringify(profile));
-        setMessage("Supabase環境変数が読み込まれていないため、プレビュー用会員として保存しました。");
+        const response = await fetch("/api/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            email,
+            password,
+            metadata
+          })
+        });
+        const result = (await response.json()) as { ok?: boolean; message?: string };
+
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message ?? "Supabase登録APIでエラーが発生しました。");
+        }
+
+        setSupabaseReady(true);
+        setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
       }
 
-      setCreatedMember(!supabase || requestedLegacyMemberId ? profile : null);
+      setCreatedMember(requestedLegacyMemberId ? profile : null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登録中にエラーが発生しました。");
     } finally {
@@ -194,7 +213,7 @@ export default function RegisterPage() {
 
           <div className="mt-5 rounded-md bg-ocean-50 p-4">
             <p className="text-sm font-bold text-ocean-700">
-              {legacyMemberNumber ? "引き継ぐGoogleフォーム番号" : "新規発行予定の会員ID（プレビュー）"}
+              {legacyMemberNumber ? "引き継ぐGoogleフォーム番号" : "新規発行予定の会員ID"}
             </p>
             <p className="mt-1 text-2xl font-black text-ink">{legacyMemberNumber || memberId}</p>
             {legacyMemberNumber ? (
@@ -247,7 +266,7 @@ export default function RegisterPage() {
             <p className="mt-2 text-sm leading-6">
               {supabaseReady
                 ? "Supabase接続済みです。登録情報はSupabase Authとprofilesテーブルに保存されます。"
-                : "Supabase未設定時はブラウザ内にプレビュー保存します。NEXT_PUBLIC_SUPABASE_URLとNEXT_PUBLIC_SUPABASE_ANON_KEYを設定するとSupabaseへ保存します。"}
+                : "Supabase未接続です。NEXT_PUBLIC_SUPABASE_URLとNEXT_PUBLIC_SUPABASE_ANON_KEYがVercelで読み込まれるまで、会員登録は保存されません。"}
             </p>
           </div>
         </div>
