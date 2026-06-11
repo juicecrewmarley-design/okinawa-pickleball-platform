@@ -84,7 +84,7 @@ export default function RegisterPage() {
         setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
       } else {
         window.localStorage.setItem("opba-demo-member", JSON.stringify(profile));
-        setMessage("Supabase未設定のため、プレビュー用会員として保存しました。");
+        setMessage("Supabase環境変数が読み込まれていないため、プレビュー用会員として保存しました。");
       }
 
       setCreatedMember(!isSupabaseConfigured || requestedLegacyMemberId ? profile : null);
@@ -241,7 +241,9 @@ export default function RegisterPage() {
           <div className="rounded-lg bg-coral-100 p-5 text-coral-600">
             <p className="font-black">MVPメモ</p>
             <p className="mt-2 text-sm leading-6">
-              Supabase未設定時はブラウザ内にプレビュー保存します。本番運用ではSupabase Authとprofilesテーブルに保存します。
+              {isSupabaseConfigured
+                ? "Supabase接続済みです。登録情報はSupabase Authとprofilesテーブルに保存されます。"
+                : "Supabase未設定時はブラウザ内にプレビュー保存します。NEXT_PUBLIC_SUPABASE_URLとNEXT_PUBLIC_SUPABASE_ANON_KEYを設定するとSupabaseへ保存します。"}
             </p>
           </div>
         </div>
