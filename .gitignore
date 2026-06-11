@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# local env
+.env.local
+.env*.local
+
+# local tooling/cache
+.npm-cache/
+.tools/
+
+# verification artifacts
+artifacts/
+.zip-build-*/
+
+# OS/editor
+.DS_Store
+Thumbs.db
