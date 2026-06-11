@@ -10,6 +10,17 @@ export function normalizeMemberId(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, "");
 }
 
+export function normalizeMemberNumber(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+export function formatLegacyMemberId(value: string) {
+  const normalized = normalizeMemberId(value);
+  const number = normalized.match(/^(?:OKP-?)?(\d+)$/)?.[1];
+  if (!number) return normalized;
+  return `OKP-${number.padStart(4, "0")}`;
+}
+
 export function buildMemberCardPayload(member: Pick<MemberProfile, "memberId" | "fullName" | "residenceScope" | "municipality">) {
   return JSON.stringify({
     issuer: "Okinawa Pickleball Association",

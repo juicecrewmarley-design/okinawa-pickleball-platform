@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, Loader2, UserPlus } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
-import { generateMemberId, normalizeMemberId } from "@/lib/member";
+import { formatLegacyMemberId, generateMemberId, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
@@ -22,7 +22,7 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [createdMember, setCreatedMember] = useState<MemberProfile | null>(null);
   const [memberId, setMemberId] = useState("");
-  const [legacyMemberId, setLegacyMemberId] = useState("");
+  const [legacyMemberNumber, setLegacyMemberNumber] = useState("");
   const [residenceScope, setResidenceScope] = useState<ResidenceScope>("okinawa");
 
   useEffect(() => {
@@ -37,7 +37,8 @@ export default function RegisterPage() {
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email"));
     const password = String(formData.get("password"));
-    const requestedLegacyMemberId = normalizeMemberId(String(formData.get("legacyMemberId") ?? ""));
+    const legacyMemberNumber = normalizeMemberNumber(String(formData.get("legacyMemberNumber") ?? ""));
+    const requestedLegacyMemberId = legacyMemberNumber ? formatLegacyMemberId(legacyMemberNumber) : "";
     const municipality = residenceScope === "okinawa" ? String(formData.get("municipality") ?? "") : "";
     const area = residenceScope === "okinawa" ? municipalityToArea(municipality) : "other";
     const issuedMemberId = requestedLegacyMemberId || memberId || generateMemberId();
@@ -171,30 +172,36 @@ export default function RegisterPage() {
               <input required name="password" type="password" minLength={8} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="8文字以上" />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700 sm:col-span-2">
-              Googleフォームで発行済みの会員ID
+              Googleフォームで発行済みの会員番号
               <input
-                name="legacyMemberId"
-                value={legacyMemberId}
-                onChange={(event) => setLegacyMemberId(normalizeMemberId(event.target.value))}
+                name="legacyMemberNumber"
+                value={legacyMemberNumber}
+                onChange={(event) => setLegacyMemberNumber(normalizeMemberNumber(event.target.value))}
+                inputMode="numeric"
+                pattern="[0-9]*"
                 className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
-                placeholder="例: OKP-0001"
+                placeholder="例: 0001"
               />
               <span className="text-xs leading-5 text-slate-500">
-                既にGoogleフォームで会員登録済みの方だけ入力してください。Supabase側では登録メールアドレスと照合して、この番号を引き継ぎます。
+                既にGoogleフォームで会員登録済みの方だけ、番号のみ入力してください。Supabase側では登録メールアドレスと照合して、この番号を引き継ぎます。
               </span>
             </label>
           </div>
 
           <div className="mt-5 rounded-md bg-ocean-50 p-4">
             <p className="text-sm font-bold text-ocean-700">
-              {legacyMemberId ? "引き継ぐ会員ID" : "新規発行予定の会員ID（プレビュー）"}
+              {legacyMemberNumber ? "引き継ぐGoogleフォーム番号" : "新規発行予定の会員ID（プレビュー）"}
             </p>
-            <p className="mt-1 text-2xl font-black text-ink">{legacyMemberId || memberId}</p>
-            {!legacyMemberId ? (
+            <p className="mt-1 text-2xl font-black text-ink">{legacyMemberNumber || memberId}</p>
+            {legacyMemberNumber ? (
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                登録時は自動で既存会員IDに変換して照合します。
+              </p>
+            ) : (
               <p className="mt-2 text-xs leading-5 text-slate-500">
                 Supabase本番環境では、DB側で次の空き番号を正式発行します。
               </p>
-            ) : null}
+            )}
           </div>
 
           {message ? (

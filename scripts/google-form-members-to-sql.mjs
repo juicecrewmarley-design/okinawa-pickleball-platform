@@ -151,7 +151,10 @@ function parseCsv(text) {
 }
 
 function normalizeMemberId(value) {
-  return value.trim().toUpperCase().replace(/\s+/g, "");
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, "");
+  const number = normalized.match(/^(?:OKP-?)?(\d+)$/)?.[1];
+  if (!number) return normalized;
+  return `OKP-${number.padStart(4, "0")}`;
 }
 
 function mapGender(value) {

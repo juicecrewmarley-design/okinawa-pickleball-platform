@@ -277,7 +277,10 @@ declare
   final_residence_scope public.residence_scope;
   final_municipality text;
 begin
-  requested_legacy_member_id := nullif(upper(trim(new.raw_user_meta_data ->> 'legacy_member_id')), '');
+  requested_legacy_member_id := nullif(upper(regexp_replace(trim(new.raw_user_meta_data ->> 'legacy_member_id'), '\s+', '', 'g')), '');
+  if requested_legacy_member_id ~ '^(OKP-?)?[0-9]+$' then
+    requested_legacy_member_id := 'OKP-' || lpad(substring(requested_legacy_member_id from '([0-9]+)$'), 4, '0');
+  end if;
 
   select *
   into legacy_match
