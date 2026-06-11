@@ -7,7 +7,7 @@ import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
 import { formatLegacyMemberId, generateMemberId, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
 
 const genderOptions: { value: Gender; label: string }[] = [
@@ -24,9 +24,11 @@ export default function RegisterPage() {
   const [memberId, setMemberId] = useState("");
   const [legacyMemberNumber, setLegacyMemberNumber] = useState("");
   const [residenceScope, setResidenceScope] = useState<ResidenceScope>("okinawa");
+  const [supabaseReady, setSupabaseReady] = useState(isSupabaseConfigured);
 
   useEffect(() => {
     setMemberId(generateMemberId());
+    getSupabaseClient().then((client) => setSupabaseReady(Boolean(client)));
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -60,8 +62,10 @@ export default function RegisterPage() {
     };
 
     try {
-      if (isSupabaseConfigured && supabase) {
-        const { data, error } = await supabase.auth.signUp({
+      const supabase = await getSupabaseClient();
+
+      if (supabase) {
+        const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -87,7 +91,7 @@ export default function RegisterPage() {
         setMessage("Supabase環境変数が読み込まれていないため、プレビュー用会員として保存しました。");
       }
 
-      setCreatedMember(!isSupabaseConfigured || requestedLegacyMemberId ? profile : null);
+      setCreatedMember(!supabase || requestedLegacyMemberId ? profile : null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登録中にエラーが発生しました。");
     } finally {
@@ -241,7 +245,7 @@ export default function RegisterPage() {
           <div className="rounded-lg bg-coral-100 p-5 text-coral-600">
             <p className="font-black">MVPメモ</p>
             <p className="mt-2 text-sm leading-6">
-              {isSupabaseConfigured
+              {supabaseReady
                 ? "Supabase接続済みです。登録情報はSupabase Authとprofilesテーブルに保存されます。"
                 : "Supabase未設定時はブラウザ内にプレビュー保存します。NEXT_PUBLIC_SUPABASE_URLとNEXT_PUBLIC_SUPABASE_ANON_KEYを設定するとSupabaseへ保存します。"}
             </p>
