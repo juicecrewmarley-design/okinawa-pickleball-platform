@@ -4,7 +4,6 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { Loader2, LockKeyhole, Shield } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
-import { isAdminEmail, isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const [mode, setMode] = useState<"member" | "admin">("member");
@@ -21,18 +20,27 @@ export default function LoginPage() {
     const password = String(formData.get("password"));
 
     try {
-      if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        if (mode === "admin" && !isAdminEmail(email)) {
-          setMessage("ログインしました。管理者権限はprofiles.roleで確認してください。");
-        } else {
-          setMessage("ログインしました。マイページへ移動できます。");
-        }
-      } else {
-        window.localStorage.setItem("opba-demo-session", JSON.stringify({ email, mode }));
-        setMessage(mode === "admin" ? "プレビュー管理者としてログインしました。" : "プレビュー会員としてログインしました。");
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email, password })
+      });
+      const result = (await response.json()) as { ok?: boolean; message?: string; role?: string };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message ?? "ログインできませんでした。");
       }
+
+      if (mode === "admin" && result.role !== "admin") {
+        setMessage("管理者権限がありません。ホームへ移動します。");
+        window.location.href = "/";
+        return;
+      }
+
+      setMessage("ログインしました。移動します。");
+      window.location.href = mode === "admin" ? "/admin" : "/mypage";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ログイン中にエラーが発生しました。");
     } finally {
