@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
 import { getServerAuthContextWithDiagnostics, type ServerAuthDiagnostics } from "@/lib/server-auth";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
@@ -95,6 +96,12 @@ function errorResponse(message: string, status: number, diagnostics: TournamentS
     },
     { status }
   );
+}
+
+function revalidateTournamentPages(tournamentId: string) {
+  revalidatePath("/");
+  revalidatePath("/tournaments");
+  revalidatePath(`/tournaments/${tournamentId}`);
 }
 
 export async function POST(request: Request) {
@@ -199,6 +206,7 @@ export async function POST(request: Request) {
 
     if (!error) {
       diagnostics.insertedWith = "rls";
+      revalidateTournamentPages(data.id);
 
       return NextResponse.json({
         diagnostics,
@@ -232,6 +240,7 @@ export async function POST(request: Request) {
 
       if (!serviceError) {
         diagnostics.insertedWith = "service_role";
+        revalidateTournamentPages(serviceData.id);
 
         return NextResponse.json({
           diagnostics,

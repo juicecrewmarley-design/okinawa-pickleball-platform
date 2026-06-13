@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { Bell, Building2, CalendarPlus, ClipboardList, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
@@ -78,6 +79,7 @@ export default function AdminDashboard() {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingAction, setSavingAction] = useState<string | null>(null);
+  const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
 
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
@@ -96,7 +98,7 @@ export default function AdminDashboard() {
 
       setMessageTone("success");
       setMessage(result.message ?? fallbackMessage);
-      return true;
+      return result;
     } catch (error) {
       console.error("Admin form save failed", {
         endpoint,
@@ -105,7 +107,7 @@ export default function AdminDashboard() {
       });
       setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "保存中にエラーが発生しました。");
-      return false;
+      return null;
     }
   }
 
@@ -114,6 +116,7 @@ export default function AdminDashboard() {
     console.log("tournament save clicked");
     setMessageTone("success");
     setMessage("保存処理を開始しました");
+    setSavedTournamentId(null);
 
     const formData = new FormData(event.currentTarget);
     const title = String(formData.get("title") ?? "").trim();
@@ -194,6 +197,7 @@ export default function AdminDashboard() {
     setSavingAction(null);
 
     if (saved) {
+      setSavedTournamentId(saved.id ?? null);
       event.currentTarget.reset();
     }
   }
@@ -261,7 +265,7 @@ export default function AdminDashboard() {
       </nav>
 
       {message ? (
-        <p
+        <div
           className={`mb-5 rounded-md px-4 py-3 text-sm font-bold ${
             messageTone === "success" ? "bg-palm-100 text-palm-700" : "bg-coral-100 text-coral-700"
           }`}
@@ -271,7 +275,17 @@ export default function AdminDashboard() {
               {line}
             </span>
           ))}
-        </p>
+          {messageTone === "success" && savedTournamentId ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link className="rounded-md bg-white px-3 py-2 text-xs font-black text-ink shadow-sm hover:bg-ocean-50" href="/tournaments">
+                大会一覧で確認
+              </Link>
+              <Link className="rounded-md bg-white px-3 py-2 text-xs font-black text-ink shadow-sm hover:bg-ocean-50" href={`/tournaments/${savedTournamentId}`}>
+                詳細ページを開く
+              </Link>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="space-y-6">
