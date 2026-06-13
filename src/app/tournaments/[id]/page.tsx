@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEventHandler, FocusEventHandler, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users } from "lucide-react";
@@ -20,6 +20,24 @@ type TournamentApiResult = {
   tournament?: Tournament | null;
 };
 
+type MemberLookupPurpose = "applicant" | "partner";
+
+type MemberLookupResult = {
+  message?: string;
+  ok?: boolean;
+  profile?: {
+    email?: string;
+    fullName: string;
+    memberId: string;
+    phone?: string;
+  };
+};
+
+type LookupStatus = {
+  text: string;
+  tone: "idle" | "loading" | "success" | "error";
+};
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -33,6 +51,18 @@ export default function TournamentDetailPage() {
   const [message, setMessage] = useState("");
   const [entryType, setEntryType] = useState<EntryType>("doubles");
   const [applicantType, setApplicantType] = useState<ApplicantType>("member");
+  const [applicantMemberId, setApplicantMemberId] = useState("");
+  const [applicantName, setApplicantName] = useState("");
+  const [applicantEmail, setApplicantEmail] = useState("");
+  const [applicantPhone, setApplicantPhone] = useState("");
+  const [partnerMemberId, setPartnerMemberId] = useState("");
+  const [partnerName, setPartnerName] = useState("");
+  const [applicantLookup, setApplicantLookup] = useState<LookupStatus>({ text: "", tone: "idle" });
+  const [partnerLookup, setPartnerLookup] = useState<LookupStatus>({ text: "", tone: "idle" });
+  const lastLookupKey = useRef<Record<MemberLookupPurpose, string>>({
+    applicant: "",
+    partner: ""
+  });
 
   useEffect(() => {
     let active = true;
@@ -76,6 +106,90 @@ export default function TournamentDetailPage() {
   const totalCapacity = sumCategoryCapacities(categoryCapacities) || tournament?.capacity || 0;
   const memberFeeYen = tournament?.memberFeeYen ?? categoryConfig.fees?.member ?? tournament?.feeYen ?? 0;
   const guestFeeYen = tournament?.guestFeeYen ?? categoryConfig.fees?.guest ?? tournament?.feeYen ?? 0;
+
+  const lookupMember = useCallback(async (memberId: string, purpose: MemberLookupPurpose) => {
+    const trimmedMemberId = memberId.trim();
+    if (!trimmedMemberId) return;
+
+    const lookupKey = `${purpose}:${trimmedMemberId}`;
+    if (lastLookupKey.current[purpose] === lookupKey) return;
+    lastLookupKey.current[purpose] = lookupKey;
+
+    const setLookup = purpose === "applicant" ? setApplicantLookup : setPartnerLookup;
+    setLookup({ text: "会員情報を確認しています。", tone: "loading" });
+
+    try {
+      const response = await fetch("/api/members/lookup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          memberId: trimmedMemberId,
+          purpose
+        })
+      });
+      const result = (await response.json()) as MemberLookupResult;
+
+      if (!response.ok || !result.ok || !result.profile) {
+        throw new Error(result.message ?? "会員情報を取得できませんでした。");
+      }
+
+      if (purpose === "applicant") {
+        setApplicantMemberId(result.profile.memberId);
+        setApplicantName(result.profile.fullName);
+        setApplicantEmail(result.profile.email ?? "");
+        setApplicantPhone(result.profile.phone ?? "");
+      } else {
+        setPartnerMemberId(result.profile.memberId);
+        setPartnerName(result.profile.fullName);
+      }
+
+      lastLookupKey.current[purpose] = `${purpose}:${result.profile.memberId}`;
+      setLookup({ text: "会員情報を反映しました。", tone: "success" });
+    } catch (error) {
+      lastLookupKey.current[purpose] = "";
+      setLookup({
+        text: error instanceof Error ? error.message : "会員情報を取得できませんでした。",
+        tone: "error"
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (applicantType !== "member" || applicantMemberId.trim().length < 2) return;
+
+    const timeoutId = window.setTimeout(() => {
+      lookupMember(applicantMemberId, "applicant");
+    }, 650);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [applicantMemberId, applicantType, lookupMember]);
+
+  useEffect(() => {
+    if (entryType !== "doubles" || partnerMemberId.trim().length < 2) return;
+
+    const timeoutId = window.setTimeout(() => {
+      lookupMember(partnerMemberId, "partner");
+    }, 650);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [entryType, lookupMember, partnerMemberId]);
+
+  function resetEntryForm() {
+    setApplicantMemberId("");
+    setApplicantName("");
+    setApplicantEmail("");
+    setApplicantPhone("");
+    setPartnerMemberId("");
+    setPartnerName("");
+    setApplicantLookup({ text: "", tone: "idle" });
+    setPartnerLookup({ text: "", tone: "idle" });
+    lastLookupKey.current = {
+      applicant: "",
+      partner: ""
+    };
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -148,6 +262,7 @@ export default function TournamentDetailPage() {
           : `${entryLabel} は申込受付済みです。会員IDの紐づけまたは管理者確認後に確定できます。参加費は${formatYen(entryFeeYen)}です。`
       );
       event.currentTarget.reset();
+      resetEntryForm();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "エントリー中にエラーが発生しました。");
     } finally {
@@ -251,7 +366,14 @@ export default function TournamentDetailPage() {
               <button
                 key={type}
                 type="button"
-                onClick={() => setApplicantType(type)}
+                onClick={() => {
+                  setApplicantType(type);
+                  setApplicantLookup({ text: "", tone: "idle" });
+                  if (type === "guest") {
+                    setApplicantMemberId("");
+                    lastLookupKey.current.applicant = "";
+                  }
+                }}
                 className={`focus-ring rounded-md px-3 py-3 text-sm font-black ${
                   applicantType === type ? "bg-white text-ink shadow" : "text-coral-700"
                 }`}
@@ -262,13 +384,50 @@ export default function TournamentDetailPage() {
           </div>
 
           <div className="mb-4 grid gap-4 rounded-md bg-ocean-50 p-3">
-            <AdminLikeInput name="applicantName" label="申込者氏名" placeholder="例: 沖縄 花子" required />
             {applicantType === "member" ? (
-              <AdminLikeInput name="applicantMemberId" label="申込者の会員ID" placeholder="例: OKP-0001" required />
+              <div>
+                <AdminLikeInput
+                  name="applicantMemberId"
+                  label="申込者の会員ID"
+                  placeholder="例: 0001 または OKP-0001"
+                  required
+                  value={applicantMemberId}
+                  onBlur={() => lookupMember(applicantMemberId, "applicant")}
+                  onChange={(event) => {
+                    setApplicantMemberId(event.target.value);
+                    setApplicantLookup({ text: "", tone: "idle" });
+                  }}
+                />
+                <LookupHint status={applicantLookup} />
+              </div>
             ) : null}
+            <AdminLikeInput
+              name="applicantName"
+              label="申込者氏名"
+              placeholder="例: 沖縄 花子"
+              required
+              value={applicantName}
+              onChange={(event) => setApplicantName(event.target.value)}
+            />
             <div className="grid gap-3 sm:grid-cols-2">
-              <AdminLikeInput name="applicantEmail" label="メールアドレス" type="email" placeholder="mail@example.com" required />
-              <AdminLikeInput name="applicantPhone" label="電話番号" type="tel" placeholder="090-0000-0000" required />
+              <AdminLikeInput
+                name="applicantEmail"
+                label="メールアドレス"
+                type="email"
+                placeholder="mail@example.com"
+                required
+                value={applicantEmail}
+                onChange={(event) => setApplicantEmail(event.target.value)}
+              />
+              <AdminLikeInput
+                name="applicantPhone"
+                label="電話番号"
+                type="tel"
+                placeholder="090-0000-0000"
+                required
+                value={applicantPhone}
+                onChange={(event) => setApplicantPhone(event.target.value)}
+              />
             </div>
           </div>
 
@@ -309,8 +468,28 @@ export default function TournamentDetailPage() {
                   ))}
                 </select>
               </label>
-              <AdminLikeInput name="partnerMemberId" label="ペアの会員ID（会員の場合）" placeholder="例: OKP-0002" />
-              <AdminLikeInput name="partnerName" label="ペアの氏名" placeholder="例: 金城 直人" required />
+              <div>
+                <AdminLikeInput
+                  name="partnerMemberId"
+                  label="ペアの会員ID（会員の場合）"
+                  placeholder="例: 0002 または OKP-0002"
+                  value={partnerMemberId}
+                  onBlur={() => lookupMember(partnerMemberId, "partner")}
+                  onChange={(event) => {
+                    setPartnerMemberId(event.target.value);
+                    setPartnerLookup({ text: "", tone: "idle" });
+                  }}
+                />
+                <LookupHint status={partnerLookup} />
+              </div>
+              <AdminLikeInput
+                name="partnerName"
+                label="ペアの氏名"
+                placeholder="例: 金城 直人"
+                required
+                value={partnerName}
+                onChange={(event) => setPartnerName(event.target.value)}
+              />
             </div>
           ) : (
             <div className="grid gap-4">
@@ -356,20 +535,53 @@ export default function TournamentDetailPage() {
 function AdminLikeInput({
   label,
   name,
+  onBlur,
+  onChange,
   type = "text",
   placeholder,
-  required
+  required,
+  value
 }: {
   label: string;
   name: string;
+  onBlur?: FocusEventHandler<HTMLInputElement>;
+  onChange?: ChangeEventHandler<HTMLInputElement>;
   type?: string;
   placeholder?: string;
   required?: boolean;
+  value?: string;
 }) {
   return (
     <label className="grid gap-2 text-sm font-bold text-slate-700">
       {label}
-      <input required={required} name={name} type={type} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder={placeholder} />
+      <input
+        required={required}
+        name={name}
+        type={type}
+        value={value}
+        onBlur={onBlur}
+        onChange={onChange}
+        className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+        placeholder={placeholder}
+      />
     </label>
+  );
+}
+
+function LookupHint({ status }: { status: LookupStatus }) {
+  if (!status.text) return null;
+
+  const toneClass = {
+    error: "text-coral-700",
+    idle: "text-slate-600",
+    loading: "text-ocean-700",
+    success: "text-palm-700"
+  }[status.tone];
+
+  return (
+    <p className={`mt-2 flex items-center gap-2 text-xs font-bold ${toneClass}`}>
+      {status.tone === "loading" ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
+      {status.text}
+    </p>
   );
 }
