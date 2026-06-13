@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { getAdminRouteContext } from "@/lib/admin-route";
+import { createClient } from "@supabase/supabase-js";
+import { getServerAuthContextWithDiagnostics, type ServerAuthDiagnostics } from "@/lib/server-auth";
+import { getSupabaseServerConfig } from "@/lib/supabase-env";
 
 type TournamentPayload = {
   capacity?: number;
@@ -18,6 +20,22 @@ type TournamentPayload = {
 };
 
 const tournamentSelectColumns = "id,title";
+
+type SupabaseInsertError = {
+  code?: string;
+  details?: string;
+  hint?: string;
+  message?: string;
+};
+
+type TournamentSaveDiagnostics = {
+  auth: ServerAuthDiagnostics;
+  dbAdmin: boolean | null;
+  hasServiceRoleKey: boolean;
+  insertError: SupabaseInsertError | null;
+  insertedWith: "rls" | "service_role" | null;
+  serviceRoleError: SupabaseInsertError | null;
+};
 
 function toNumber(value: unknown, fallback = 0) {
   const numberValue = Number(value);
@@ -57,10 +75,52 @@ function adminTournamentErrorMessage(error: { code?: string; message?: string })
   return `大会を保存できませんでした。Supabaseエラー: ${error.message ?? "詳細不明"}`;
 }
 
+function serializeSupabaseError(error: SupabaseInsertError | null): SupabaseInsertError | null {
+  if (!error) return null;
+
+  return {
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+    message: error.message
+  };
+}
+
+function errorResponse(message: string, status: number, diagnostics: TournamentSaveDiagnostics) {
+  return NextResponse.json(
+    {
+      diagnostics,
+      ok: false,
+      message
+    },
+    { status }
+  );
+}
+
 export async function POST(request: Request) {
   try {
-    const admin = await getAdminRouteContext();
-    if (admin.response) return admin.response;
+    const config = getSupabaseServerConfig();
+    const authResult = await getServerAuthContextWithDiagnostics();
+    const diagnostics: TournamentSaveDiagnostics = {
+      auth: authResult.diagnostics,
+      dbAdmin: null,
+      hasServiceRoleKey: Boolean(config.supabaseServiceRoleKey),
+      insertError: null,
+      insertedWith: null,
+      serviceRoleError: null
+    };
+
+    if (!authResult.context || !authResult.diagnostics.userId) {
+      return errorResponse("ログイン情報を取得できませんでした。もう一度管理者ログインしてください。", 401, diagnostics);
+    }
+
+    if (!authResult.diagnostics.profileFound) {
+      return errorResponse("ログインユーザーのプロフィールが見つかりません。profilesテーブルを確認してください。", 401, diagnostics);
+    }
+
+    if (authResult.context.profile.role !== "admin") {
+      return errorResponse("管理者権限がありません。profiles.role が admin か確認してください。", 403, diagnostics);
+    }
 
     const payload = (await request.json()) as TournamentPayload;
     const title = payload.title?.trim();
@@ -91,23 +151,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: dbAdmin, error: adminCheckError } = await admin.context.supabase.rpc("is_admin");
+    const { data: dbAdmin, error: adminCheckError } = await authResult.context.supabase.rpc("is_admin");
+    diagnostics.dbAdmin = dbAdmin === true;
 
     if (adminCheckError || dbAdmin !== true) {
       console.error("Admin tournament saving rejected by DB admin check", {
         adminCheckError,
         dbAdmin,
-        profile: admin.context.profile
+        auth: diagnostics.auth,
+        profile: authResult.context.profile
       });
 
-      return NextResponse.json(
-        {
-          ok: false,
-          message: adminCheckError
-            ? adminTournamentErrorMessage(adminCheckError)
-            : "大会を保存できませんでした。Supabase上の profiles.role が admin になっているか確認してください。"
-        },
-        { status: 403 }
+      return errorResponse(
+        adminCheckError
+          ? adminTournamentErrorMessage(adminCheckError)
+          : "大会を保存できませんでした。Supabase側で管理者判定が通りませんでした。",
+        403,
+        diagnostics
       );
     }
 
@@ -128,37 +188,85 @@ export async function POST(request: Request) {
         categoryCapacities
       },
       status: payload.status === "draft" ? "draft" : "open",
-      created_by: admin.context.profile.id
+      created_by: authResult.context.profile.id
     };
 
-    const { data, error } = await admin.context.supabase
+    const { data, error } = await authResult.context.supabase
       .from("tournaments")
       .insert(tournamentPayload)
       .select(tournamentSelectColumns)
       .single();
 
-    if (error) {
-      console.error("Admin tournament insert failed", {
-        error,
-        payload: tournamentPayload,
-        profile: admin.context.profile,
-        table: "public.tournaments"
-      });
+    if (!error) {
+      diagnostics.insertedWith = "rls";
 
-      return NextResponse.json(
-        {
-          ok: false,
-          message: adminTournamentErrorMessage(error)
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        diagnostics,
+        ok: true,
+        id: data.id,
+        message: "大会を保存しました"
+      });
     }
 
-    return NextResponse.json({
-      ok: true,
-      id: data.id,
-      message: "大会を保存しました"
+    diagnostics.insertError = serializeSupabaseError(error);
+    console.error("Admin tournament insert failed", {
+      error,
+      auth: diagnostics.auth,
+      payload: tournamentPayload,
+      profile: authResult.context.profile,
+      table: "public.tournaments"
     });
+
+    if (config.supabaseServiceRoleKey) {
+      const serviceSupabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: {
+          persistSession: false
+        }
+      });
+
+      const { data: serviceData, error: serviceError } = await serviceSupabase
+        .from("tournaments")
+        .insert(tournamentPayload)
+        .select(tournamentSelectColumns)
+        .single();
+
+      if (!serviceError) {
+        diagnostics.insertedWith = "service_role";
+
+        return NextResponse.json({
+          diagnostics,
+          ok: true,
+          id: serviceData.id,
+          message: "大会を保存しました"
+        });
+      }
+
+      diagnostics.serviceRoleError = serializeSupabaseError(serviceError);
+      console.error("Admin tournament service role insert failed", {
+        error: serviceError,
+        auth: diagnostics.auth,
+        payload: tournamentPayload,
+        profile: authResult.context.profile,
+        table: "public.tournaments"
+      });
+    } else {
+      console.error("Admin tournament insert failed", {
+        error,
+        auth: diagnostics.auth,
+        hasServiceRoleKey: false,
+        payload: tournamentPayload,
+        profile: authResult.context.profile,
+        table: "public.tournaments"
+      });
+    }
+
+    return errorResponse(
+      config.supabaseServiceRoleKey
+        ? adminTournamentErrorMessage(error)
+        : `${adminTournamentErrorMessage(error)} Vercelに SUPABASE_SERVICE_ROLE_KEY を設定すると、管理者確認後にサーバー側から保存できます。`,
+      400,
+      diagnostics
+    );
   } catch (error) {
     console.error("Admin tournament route crashed", error);
 

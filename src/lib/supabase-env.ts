@@ -2,6 +2,7 @@ export function getSupabaseServerConfig() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim() || "";
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || process.env.SUPABASE_ANON_KEY?.trim() || "";
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
   const missingKeys = [
     supabaseUrl ? "" : "NEXT_PUBLIC_SUPABASE_URL",
     supabaseAnonKey ? "" : "NEXT_PUBLIC_SUPABASE_ANON_KEY"
@@ -11,6 +12,7 @@ export function getSupabaseServerConfig() {
     isConfigured: Boolean(supabaseUrl && supabaseAnonKey),
     missingKeys,
     supabaseAnonKey,
+    supabaseServiceRoleKey,
     supabaseUrl
   };
 }

@@ -22,13 +22,44 @@ export type ServerAuthContext = {
   supabase: SupabaseClient;
 };
 
-export async function getServerAuthContext(): Promise<ServerAuthContext | null> {
+export type ServerAuthDiagnostics = {
+  authError?: string;
+  hasAccessToken: boolean;
+  isConfigured: boolean;
+  missingKeys: string[];
+  profileEmail: string | null;
+  profileError?: string;
+  profileFound: boolean;
+  role: MemberRole | null;
+  userEmail: string | null;
+  userId: string | null;
+};
+
+export type ServerAuthContextResult = {
+  context: ServerAuthContext | null;
+  diagnostics: ServerAuthDiagnostics;
+};
+
+export async function getServerAuthContextWithDiagnostics(): Promise<ServerAuthContextResult> {
   const config = getSupabaseServerConfig();
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(authCookieNames.accessToken)?.value;
+  const diagnostics: ServerAuthDiagnostics = {
+    hasAccessToken: Boolean(accessToken),
+    isConfigured: config.isConfigured,
+    missingKeys: config.missingKeys,
+    profileEmail: null,
+    profileFound: false,
+    role: null,
+    userEmail: null,
+    userId: null
+  };
 
   if (!config.isConfigured || !accessToken) {
-    return null;
+    return {
+      context: null,
+      diagnostics
+    };
   }
 
   const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
@@ -45,8 +76,15 @@ export async function getServerAuthContext(): Promise<ServerAuthContext | null> 
   const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
 
   if (userError || !userData.user) {
-    return null;
+    diagnostics.authError = userError?.message ?? "ログインユーザーを取得できませんでした。";
+    return {
+      context: null,
+      diagnostics
+    };
   }
+
+  diagnostics.userEmail = userData.user.email ?? null;
+  diagnostics.userId = userData.user.id;
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -55,20 +93,36 @@ export async function getServerAuthContext(): Promise<ServerAuthContext | null> 
     .maybeSingle();
 
   if (profileError || !profile) {
-    return null;
+    diagnostics.profileError = profileError?.message ?? "profilesにログインユーザーの行が見つかりません。";
+    return {
+      context: null,
+      diagnostics
+    };
   }
 
   const email = userData.user.email ?? profile.email;
+  const role = getEffectiveProfileRole(email, profile.role);
+  diagnostics.profileEmail = profile.email;
+  diagnostics.profileFound = true;
+  diagnostics.role = role;
 
   return {
-    accessToken,
-    profile: {
-      email,
-      id: profile.id,
-      role: getEffectiveProfileRole(email, profile.role)
+    context: {
+      accessToken,
+      profile: {
+        email,
+        id: profile.id,
+        role
+      },
+      supabase
     },
-    supabase
+    diagnostics
   };
+}
+
+export async function getServerAuthContext(): Promise<ServerAuthContext | null> {
+  const result = await getServerAuthContextWithDiagnostics();
+  return result.context;
 }
 
 export async function getServerAuthProfile(): Promise<ServerAuthProfile | null> {

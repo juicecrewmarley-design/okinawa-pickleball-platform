@@ -30,10 +30,49 @@ function capacityInputName(category: string) {
 }
 
 type AdminApiResult = {
+  diagnostics?: {
+    auth?: {
+      profileFound?: boolean;
+      role?: string | null;
+      userId?: string | null;
+    };
+    dbAdmin?: boolean | null;
+    hasServiceRoleKey?: boolean;
+    insertedWith?: string | null;
+    insertError?: {
+      code?: string;
+      details?: string;
+      message?: string;
+    } | null;
+    serviceRoleError?: {
+      code?: string;
+      details?: string;
+      message?: string;
+    } | null;
+  };
   id?: string;
   message?: string;
   ok?: boolean;
 };
+
+function formatAdminApiError(result: AdminApiResult) {
+  const diagnostics = result.diagnostics;
+  if (!diagnostics) return result.message ?? "保存できませんでした。";
+
+  const insertError = diagnostics.insertError;
+  const serviceRoleError = diagnostics.serviceRoleError;
+  const details = [
+    `userId: ${diagnostics.auth?.userId ? "取得済み" : "未取得"}`,
+    `profile: ${diagnostics.auth?.profileFound ? "あり" : "なし"}`,
+    `role: ${diagnostics.auth?.role ?? "不明"}`,
+    `dbAdmin: ${diagnostics.dbAdmin === null || diagnostics.dbAdmin === undefined ? "未確認" : diagnostics.dbAdmin ? "true" : "false"}`,
+    `service role key: ${diagnostics.hasServiceRoleKey ? "設定済み" : "未設定"}`,
+    insertError ? `insert error: ${insertError.code ?? "codeなし"} ${insertError.message ?? ""} ${insertError.details ?? ""}` : "",
+    serviceRoleError ? `service role error: ${serviceRoleError.code ?? "codeなし"} ${serviceRoleError.message ?? ""} ${serviceRoleError.details ?? ""}` : ""
+  ].filter(Boolean);
+
+  return `${result.message ?? "保存できませんでした。"}\n${details.join("\n")}`;
+}
 
 export default function AdminDashboard() {
   const [message, setMessage] = useState("");
@@ -52,7 +91,7 @@ export default function AdminDashboard() {
       const result = (await response.json()) as AdminApiResult;
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.message ?? "保存できませんでした。");
+        throw new Error(formatAdminApiError(result));
       }
 
       setMessageTone("success");
@@ -227,7 +266,11 @@ export default function AdminDashboard() {
             messageTone === "success" ? "bg-palm-100 text-palm-700" : "bg-coral-100 text-coral-700"
           }`}
         >
-          {message}
+          {message.split("\n").map((line) => (
+            <span key={line} className="block">
+              {line}
+            </span>
+          ))}
         </p>
       ) : null}
 
