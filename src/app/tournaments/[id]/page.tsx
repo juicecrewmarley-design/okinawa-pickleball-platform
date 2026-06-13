@@ -3,7 +3,7 @@
 import { ChangeEventHandler, FocusEventHandler, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatYen } from "@/lib/member";
@@ -49,6 +49,7 @@ export default function TournamentDetailPage() {
   const [tournamentError, setTournamentError] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [entryType, setEntryType] = useState<EntryType>("doubles");
   const [applicantType, setApplicantType] = useState<ApplicantType>("member");
   const [applicantMemberId, setApplicantMemberId] = useState("");
@@ -197,6 +198,7 @@ export default function TournamentDetailPage() {
 
     setLoading(true);
     setMessage("");
+    setMessageTone("success");
 
     const formData = new FormData(event.currentTarget);
     const selectedApplicantType = String(formData.get("applicantType")) === "guest" ? "guest" : "member";
@@ -220,11 +222,30 @@ export default function TournamentDetailPage() {
     const entryFeeYen = selectedApplicantType === "member" ? memberFeeYen : guestFeeYen;
     const isLinked =
       entryType === "doubles"
-        ? selectedApplicantType === "member" && Boolean(applicantMemberId && partnerMemberId && partnerName)
-        : selectedApplicantType === "member" && Boolean(applicantMemberId) && teamMembers.every((member) => member.memberId && member.name);
+        ? selectedApplicantType === "member" && Boolean(applicantMemberId && partnerMemberId)
+        : selectedApplicantType === "member" && Boolean(applicantMemberId) && teamMembers.every((member) => member.memberId);
     const status = isLinked ? "confirmed" : "pending";
     const linkingStatus = isLinked ? "linked" : "waiting";
     const entryLabel = entryType === "team" && teamName ? `${category} / ${teamName}` : category;
+
+    const missingFields = [
+      selectedApplicantType === "member" && !applicantMemberId ? "申込者の会員ID" : "",
+      selectedApplicantType === "guest" && !applicantName ? "申込者氏名" : "",
+      selectedApplicantType === "guest" && !applicantEmail ? "メールアドレス" : "",
+      selectedApplicantType === "guest" && !applicantPhone ? "電話番号" : "",
+      entryType === "doubles" && !partnerMemberId && !partnerName ? "ペアの会員IDまたは氏名" : "",
+      entryType === "team" && !teamName ? "チーム名" : "",
+      entryType === "team" && teamMembers.some((member) => !member.memberId && !member.name)
+        ? "メンバー2〜4の会員IDまたは氏名"
+        : ""
+    ].filter(Boolean);
+
+    if (missingFields.length > 0) {
+      setMessage(`未入力の項目があります: ${missingFields.join("、")}。会員IDで紐づける場合、氏名などは未記入で大丈夫です。`);
+      setMessageTone("error");
+      setLoading(false);
+      return;
+    }
 
     try {
       if (isSupabaseConfigured && supabase && isUuid(tournament.id)) {
@@ -261,10 +282,12 @@ export default function TournamentDetailPage() {
           ? `${entryLabel} は紐づけ完了のため、エントリー確定になりました。参加費は${formatYen(entryFeeYen)}です。`
           : `${entryLabel} は申込受付済みです。会員IDの紐づけまたは管理者確認後に確定できます。参加費は${formatYen(entryFeeYen)}です。`
       );
+      setMessageTone("success");
       event.currentTarget.reset();
       resetEntryForm();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "エントリー中にエラーが発生しました。");
+      setMessageTone("error");
     } finally {
       setLoading(false);
     }
@@ -399,32 +422,35 @@ export default function TournamentDetailPage() {
                   }}
                 />
                 <LookupHint status={applicantLookup} />
+                <p className="mt-2 text-xs font-bold leading-5 text-ocean-700">
+                  会員IDで紐づくため、氏名・メールアドレス・電話番号は未記入でもエントリーできます。
+                </p>
               </div>
             ) : null}
             <AdminLikeInput
               name="applicantName"
-              label="申込者氏名"
+              label={applicantType === "member" ? "申込者氏名（会員ID入力時は未記入OK）" : "申込者氏名"}
               placeholder="例: 沖縄 花子"
-              required
+              required={applicantType === "guest"}
               value={applicantName}
               onChange={(event) => setApplicantName(event.target.value)}
             />
             <div className="grid gap-3 sm:grid-cols-2">
               <AdminLikeInput
                 name="applicantEmail"
-                label="メールアドレス"
+                label={applicantType === "member" ? "メールアドレス（会員ID入力時は未記入OK）" : "メールアドレス"}
                 type="email"
                 placeholder="mail@example.com"
-                required
+                required={applicantType === "guest"}
                 value={applicantEmail}
                 onChange={(event) => setApplicantEmail(event.target.value)}
               />
               <AdminLikeInput
                 name="applicantPhone"
-                label="電話番号"
+                label={applicantType === "member" ? "電話番号（会員ID入力時は未記入OK）" : "電話番号"}
                 type="tel"
                 placeholder="090-0000-0000"
-                required
+                required={applicantType === "guest"}
                 value={applicantPhone}
                 onChange={(event) => setApplicantPhone(event.target.value)}
               />
@@ -484,9 +510,9 @@ export default function TournamentDetailPage() {
               </div>
               <AdminLikeInput
                 name="partnerName"
-                label="ペアの氏名"
+                label="ペアの氏名（会員ID入力時は未記入OK）"
                 placeholder="例: 金城 直人"
-                required
+                required={!partnerMemberId.trim()}
                 value={partnerName}
                 onChange={(event) => setPartnerName(event.target.value)}
               />
@@ -507,15 +533,23 @@ export default function TournamentDetailPage() {
               {[2, 3, 4].map((index) => (
                 <div key={index} className="grid gap-3 rounded-md bg-ocean-50 p-3 sm:grid-cols-2">
                   <AdminLikeInput name={`teamMember${index}Id`} label={`メンバー${index} 会員ID（会員の場合）`} placeholder={`例: OKP-000${index}`} />
-                  <AdminLikeInput name={`teamMember${index}Name`} label={`メンバー${index} 氏名`} placeholder="氏名" required />
+                  <AdminLikeInput name={`teamMember${index}Name`} label={`メンバー${index} 氏名（会員ID入力時は未記入OK）`} placeholder="氏名" />
                 </div>
               ))}
             </div>
           )}
 
           {message ? (
-            <p className="mt-4 flex items-center gap-2 rounded-md bg-palm-100 px-4 py-3 text-sm font-bold text-palm-700">
-              <CheckCircle2 className="size-5" aria-hidden="true" />
+            <p
+              className={`mt-4 flex items-center gap-2 rounded-md px-4 py-3 text-sm font-bold ${
+                messageTone === "error" ? "bg-coral-100 text-coral-700" : "bg-palm-100 text-palm-700"
+              }`}
+            >
+              {messageTone === "error" ? (
+                <AlertCircle className="size-5 shrink-0" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="size-5 shrink-0" aria-hidden="true" />
+              )}
               {message}
             </p>
           ) : null}
