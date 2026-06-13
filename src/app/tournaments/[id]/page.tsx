@@ -15,6 +15,8 @@ type EntryType = "doubles" | "team";
 type ApplicantType = "member" | "guest";
 
 type TournamentApiResult = {
+  message?: string;
+  ok?: boolean;
   tournament?: Tournament | null;
 };
 
@@ -26,6 +28,7 @@ export default function TournamentDetailPage() {
   const params = useParams<{ id: string }>();
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [tournamentLoading, setTournamentLoading] = useState(true);
+  const [tournamentError, setTournamentError] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [entryType, setEntryType] = useState<EntryType>("doubles");
@@ -36,17 +39,23 @@ export default function TournamentDetailPage() {
 
     async function loadTournament() {
       setTournamentLoading(true);
+      setTournamentError("");
 
       try {
         const response = await fetch(`/api/tournaments/${params.id}`, { cache: "no-store" });
         const result = (await response.json()) as TournamentApiResult;
 
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message ?? "大会情報を取得できませんでした。");
+        }
+
         if (active) {
           setTournament(result.tournament ?? null);
         }
-      } catch {
+      } catch (error) {
         if (active) {
           setTournament(null);
+          setTournamentError(error instanceof Error ? error.message : "大会情報を取得できませんでした。");
         }
       } finally {
         if (active) {
@@ -152,6 +161,19 @@ export default function TournamentDetailPage() {
         <p className="rounded-lg border border-ocean-100 bg-white p-5 text-sm font-bold text-slate-600 shadow-soft">
           少しお待ちください。
         </p>
+      </PageShell>
+    );
+  }
+
+  if (tournamentError) {
+    return (
+      <PageShell title="大会情報を取得できませんでした">
+        <div className="rounded-lg border border-coral-200 bg-coral-100 p-5 text-sm font-bold leading-7 text-coral-700 shadow-soft">
+          {tournamentError}
+        </div>
+        <Link className="mt-5 inline-flex font-black text-ocean-700" href="/tournaments">
+          大会一覧へ戻る
+        </Link>
       </PageShell>
     );
   }

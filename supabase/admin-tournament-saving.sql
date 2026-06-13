@@ -107,6 +107,7 @@ drop policy if exists "tournaments admin delete" on public.tournaments;
 
 create policy "tournaments public select"
 on public.tournaments for select
+to anon, authenticated
 using (status in ('open', 'closed', 'finished') or public.is_admin());
 
 create policy "tournaments admin insert"

@@ -1,12 +1,14 @@
 import { Filter, Search } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { TournamentCard } from "@/components/TournamentCard";
-import { getPublicTournaments } from "@/lib/public-data";
+import { getPublicTournamentsResult } from "@/lib/public-data";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function TournamentsPage() {
-  const tournaments = await getPublicTournaments();
+  const result = await getPublicTournamentsResult();
+  const tournaments = result.data;
 
   return (
     <PageShell
@@ -30,11 +32,21 @@ export default async function TournamentsPage() {
         </label>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {tournaments.map((tournament) => (
-          <TournamentCard key={tournament.id} tournament={tournament} />
-        ))}
-      </div>
+      {result.error ? (
+        <div className="rounded-lg border border-coral-200 bg-coral-100 p-5 text-sm font-bold leading-7 text-coral-700 shadow-soft">
+          {result.error}
+        </div>
+      ) : tournaments.length > 0 ? (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {tournaments.map((tournament) => (
+            <TournamentCard key={tournament.id} tournament={tournament} />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-ocean-100 bg-white p-5 text-sm font-bold leading-7 text-slate-600 shadow-soft">
+          現在公開中の大会はありません。管理画面で大会を作成すると、ここに表示されます。
+        </div>
+      )}
     </PageShell>
   );
 }

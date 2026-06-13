@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
-import { notices as mockNotices, sponsors as mockSponsors, tournaments as mockTournaments } from "@/lib/mock-data";
+import { notices as mockNotices, sponsors as mockSponsors } from "@/lib/mock-data";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
 import type { Notice, Sponsor, Tournament, TournamentCategoryConfig, TournamentStatus } from "@/types/domain";
 
@@ -36,6 +36,13 @@ type SponsorRow = {
   logo_url: string | null;
   rank: Sponsor["rank"];
   website_url: string | null;
+};
+
+export type PublicDataResult<T> = {
+  data: T;
+  details?: string;
+  error: string | null;
+  isConfigured: boolean;
 };
 
 function getPublicSupabase() {
@@ -89,32 +96,95 @@ function mapSponsor(row: SponsorRow): Sponsor {
   };
 }
 
+function publicTournamentErrorMessage(error: { code?: string; details?: string; message?: string }) {
+  const detailText = [error.code, error.message, error.details].filter(Boolean).join(" / ");
+
+  if (error.code === "42P01") {
+    return "大会テーブル public.tournaments が見つかりません。Supabase SQL Editorで大会テーブル作成SQLを実行してください。";
+  }
+
+  if (error.code === "42501" || error.message?.toLowerCase().includes("permission")) {
+    return `大会一覧を取得できませんでした。public.tournaments の select 権限またはRLSポリシーを確認してください。${detailText ? ` (${detailText})` : ""}`;
+  }
+
+  return `大会一覧を取得できませんでした。Supabaseエラーを確認してください。${detailText ? ` (${detailText})` : ""}`;
+}
+
+const tournamentColumns =
+  "id,title,description,venue,start_at,entry_deadline,fee_yen,member_fee_yen,guest_fee_yen,capacity,category_capacities,categories,category_config,status";
+
 export async function getPublicTournaments() {
+  const result = await getPublicTournamentsResult();
+  return result.data;
+}
+
+export async function getPublicTournamentsResult(): Promise<PublicDataResult<Tournament[]>> {
   const supabase = getPublicSupabase();
-  if (!supabase) return mockTournaments;
+  if (!supabase) {
+    return {
+      data: [],
+      error: "Supabase環境変数が未設定のため、大会一覧を取得できません。NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_ANON_KEY を確認してください。",
+      isConfigured: false
+    };
+  }
 
   const { data, error } = await supabase
     .from("tournaments")
-    .select("id,title,description,venue,start_at,entry_deadline,fee_yen,member_fee_yen,guest_fee_yen,capacity,category_capacities,categories,category_config,status")
+    .select(tournamentColumns)
     .in("status", ["open", "closed", "finished"])
     .order("start_at", { ascending: true });
 
-  if (error || !data) return mockTournaments;
-  return (data as TournamentRow[]).map(mapTournament);
+  if (error || !data) {
+    return {
+      data: [],
+      details: error?.details,
+      error: error ? publicTournamentErrorMessage(error) : "大会一覧を取得できませんでした。Supabaseからデータが返りませんでした。",
+      isConfigured: true
+    };
+  }
+
+  return {
+    data: (data as TournamentRow[]).map(mapTournament),
+    error: null,
+    isConfigured: true
+  };
 }
 
 export async function getPublicTournament(id: string) {
+  const result = await getPublicTournamentResult(id);
+  return result.data;
+}
+
+export async function getPublicTournamentResult(id: string): Promise<PublicDataResult<Tournament | null>> {
   const supabase = getPublicSupabase();
-  if (!supabase) return mockTournaments.find((tournament) => tournament.id === id) ?? null;
+  if (!supabase) {
+    return {
+      data: null,
+      error: "Supabase環境変数が未設定のため、大会詳細を取得できません。NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_ANON_KEY を確認してください。",
+      isConfigured: false
+    };
+  }
 
   const { data, error } = await supabase
     .from("tournaments")
-    .select("id,title,description,venue,start_at,entry_deadline,fee_yen,member_fee_yen,guest_fee_yen,capacity,category_capacities,categories,category_config,status")
+    .select(tournamentColumns)
     .eq("id", id)
     .maybeSingle();
 
-  if (error || !data) return mockTournaments.find((tournament) => tournament.id === id) ?? null;
-  return mapTournament(data as TournamentRow);
+  if (error) {
+    return {
+      data: null,
+      details: error.details,
+      error: publicTournamentErrorMessage(error).replace("大会一覧", "大会詳細"),
+      isConfigured: true
+    };
+  }
+
+  return {
+    data: data ? mapTournament(data as TournamentRow) : null,
+    error: null,
+    isConfigured: true
+  };
 }
 
 export async function getPublicNotices() {
