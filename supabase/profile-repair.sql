@@ -99,7 +99,7 @@ $$;
 
 create table if not exists public.legacy_members (
   member_id text primary key,
-  email text not null unique,
+  email text not null,
   full_name text not null,
   furigana text,
   gender public.gender_type not null default 'no_answer',
@@ -108,10 +108,21 @@ create table if not exists public.legacy_members (
   area public.member_area not null default 'other',
   residence_scope public.residence_scope not null default 'okinawa',
   municipality text,
+  prefecture text,
+  region_text text,
+  pickleball_experience text,
+  form_timestamp timestamptz,
+  source text not null default 'google_form',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table public.legacy_members drop constraint if exists legacy_members_email_key;
+alter table public.legacy_members add column if not exists prefecture text;
+alter table public.legacy_members add column if not exists region_text text;
+alter table public.legacy_members add column if not exists pickleball_experience text;
+alter table public.legacy_members add column if not exists form_timestamp timestamptz;
+alter table public.legacy_members add column if not exists source text not null default 'google_form';
 alter table public.legacy_members add column if not exists claimed_by uuid references auth.users(id) on delete set null;
 alter table public.legacy_members add column if not exists claimed_at timestamptz;
 
@@ -205,6 +216,9 @@ set search_path = public
 as $$
 declare
   requested_legacy_member_id text;
+  requested_legacy_birth_date text;
+  requested_legacy_phone_last4 text;
+  legacy_birth_date date;
   legacy_match public.legacy_members%rowtype;
   final_member_id text;
   final_full_name text;
@@ -221,16 +235,46 @@ begin
     requested_legacy_member_id := 'OKP-' || lpad(substring(requested_legacy_member_id from '([0-9]+)$'), 4, '0');
   end if;
 
-  select *
-  into legacy_match
-  from public.legacy_members
-  where lower(email) = lower(auth_email)
-    and (requested_legacy_member_id is null or member_id = requested_legacy_member_id)
-  order by member_id
-  limit 1;
+  requested_legacy_birth_date := nullif(trim(auth_raw_user_meta_data ->> 'legacy_birth_date'), '');
+  if requested_legacy_birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+    legacy_birth_date := requested_legacy_birth_date::date;
+  end if;
+  requested_legacy_phone_last4 := right(regexp_replace(coalesce(auth_raw_user_meta_data ->> 'legacy_phone_last4', ''), '\D', '', 'g'), 4);
 
-  if strict_legacy_match and requested_legacy_member_id is not null and legacy_match.member_id is null then
-    raise exception '入力された会員IDは、このメールアドレスのGoogleフォーム登録と一致しません。';
+  if requested_legacy_member_id is not null then
+    select *
+    into legacy_match
+    from public.legacy_members
+    where member_id = requested_legacy_member_id
+    limit 1
+    for update;
+
+    if strict_legacy_match and legacy_match.member_id is null then
+      raise exception '会員番号または本人確認情報が一致しません。';
+    end if;
+
+    if strict_legacy_match and legacy_match.claimed_by is not null and legacy_match.claimed_by <> auth_user_id then
+      raise exception 'この会員番号は既にアプリ登録済みです。';
+    end if;
+
+    if strict_legacy_match and exists (
+      select 1
+      from public.profiles p
+      where p.member_id = requested_legacy_member_id
+        and p.id <> auth_user_id
+    ) then
+      raise exception 'この会員番号は既にアプリ登録済みです。';
+    end if;
+
+    if strict_legacy_match and not (
+      (legacy_birth_date is not null and legacy_match.birth_date = legacy_birth_date)
+      or (
+        length(requested_legacy_phone_last4) = 4
+        and right(regexp_replace(coalesce(legacy_match.phone, ''), '\D', '', 'g'), 4) = requested_legacy_phone_last4
+      )
+    ) then
+      raise exception '会員番号または本人確認情報が一致しません。';
+    end if;
   end if;
 
   final_member_id := coalesce(legacy_match.member_id, public.next_member_id());
@@ -263,7 +307,8 @@ begin
     update public.legacy_members
     set claimed_by = auth_user_id,
         claimed_at = coalesce(claimed_at, now())
-    where member_id = legacy_match.member_id;
+    where member_id = legacy_match.member_id
+      and (claimed_by is null or claimed_by = auth_user_id);
   end if;
 end;
 $$;

@@ -15,7 +15,7 @@
 - 管理者画面: 会員一覧、大会作成フォーム、参加者一覧、試合結果入力、お知らせ投稿、協賛企業登録の初期UIです。
 - OPRランキング: 男子ダブルス、女子ダブルス、ミックスダブルスをカテゴリ別に表示し、総合は男子・女子に分けて表示します。
 - お知らせ・協賛企業: イベント案内とスポンサー掲載ページです。
-- Googleフォーム既存会員ID引き継ぎ: 登録画面では番号だけを入力し、Supabase登録時に既存番号を照合して引き継ぎます。
+- Googleフォーム既存会員ID引き継ぎ: 登録画面で番号引き継ぎを選び、L列の4桁番号と生年月日または電話番号下4桁で本人確認してから既存番号を引き継ぎます。
 
 Supabase未設定でもサンプルデータで画面確認できます。環境変数を設定すると、登録・ログイン・大会エントリーがSupabase向けに動きます。
 
@@ -75,6 +75,7 @@ Copy-Item .env.local.example .env.local
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
 Supabaseをまだ設定しない場合でも、サンプルデータで画面プレビューできます。
@@ -103,22 +104,33 @@ http://localhost:3000
 - Googleフォーム既存会員の取り込み: `docs/google-form-import.md`
 - Supabaseスキーマ: `supabase/schema.sql`
 
-## Googleフォーム既存会員の登録済み化
+## Googleフォーム既存会員の安全な引き継ぎ
 
-既にGoogleフォームで登録済みの方は、フォームで発行された番号をアプリ登録時に引き継げます。登録画面では `0001` のように番号だけ入力できます。
+`legacy_members` は過去のGoogleフォーム会員データ、`profiles` はアプリに正式登録した会員データです。既存会員は登録画面で「番号引き継ぐ方」を選び、L列のOKP番号4桁に加えて、生年月日または電話番号下4桁で本人確認します。照合に成功するまで、氏名・メールアドレス・電話番号などの個人情報は画面に表示しません。
 
-1. Googleスプレッドシートの `フォームの回答 1` タブをCSVでダウンロードします。
-2. 以下を実行して、Supabase投入用SQLを作成します。
+引き継ぎ登録が完了すると、`profiles.member_id` に既存の会員IDを保存し、`legacy_members.claimed_by` と `legacy_members.claimed_at` に登録済み情報を記録します。すでに `claimed_by` が入っている会員番号は再利用できません。ブラウザ側から `legacy_members` を直接読むことはなく、必ずサーバーAPI経由で照合します。
+
+安全に取り込む手順:
+
+1. Supabase SQL Editorで `supabase/schema.sql` を実行します。
+2. Googleスプレッドシートの `フォームの回答 1` タブをCSVでダウンロードします。
+3. CSVをローカルPCだけに置き、以下で投入用SQLを作成します。
 
 ```powershell
 npm run import:legacy-members -- .\google-form-members.csv
 ```
 
-3. Supabase SQL Editorで `supabase/schema.sql` を実行します。
-4. 続けて生成された `supabase/legacy-members-import.sql` を実行します。
-5. 既存会員は、会員登録画面でGoogleフォーム登録時のメールアドレスと会員番号だけを入力します。
+4. 生成される `supabase/legacy-members-import.sql` は個人情報を含むため、GitHubへコミットしないでください。`.gitignore` で除外済みです。
+5. 生成SQLは50件ずつの `insert into public.legacy_members (...) values ... on conflict (member_id) do update ...;` ブロックに分かれます。Supabase SQL Editorへ1ブロックずつ貼り付けて実行できます。
+6. 最後に以下で件数を確認します。
 
-詳しくは `docs/google-form-import.md` を確認してください。
+```sql
+select count(*) from public.legacy_members;
+```
+
+今回添付された `沖縄ピックルボールメンバー会員登録（回答） (2).xlsx` は209名分（`OKP-0001` から `OKP-0209`）です。Googleフォームでは同じメールアドレスを複数会員が使っている場合があるため、`legacy_members` は `member_id` を主キーにし、メールアドレスの重複を許可します。
+
+既存会員照合にはサーバー側の `SUPABASE_SERVICE_ROLE_KEY` が必要です。VercelのEnvironment Variablesに、`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY` を設定してください。詳しくは `docs/google-form-import.md` も確認してください。
 
 ## 管理者権限
 

@@ -17,6 +17,9 @@ out/
 artifacts/
 .zip-build-*/
 
+# sensitive imports
+supabase/legacy-members-import*.sql
+
 # OS/editor
 .DS_Store
 Thumbs.db

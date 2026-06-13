@@ -7,7 +7,7 @@ import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
 import { formatLegacyMemberId, generateMemberId, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
-import { getSupabaseClient, getSupabaseConfigStatus, isSupabaseConfigured } from "@/lib/supabase";
+import { getSupabaseConfigStatus, isSupabaseConfigured } from "@/lib/supabase";
 import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
 
 const genderOptions: { value: Gender; label: string }[] = [
@@ -17,13 +17,53 @@ const genderOptions: { value: Gender; label: string }[] = [
   { value: "no_answer", label: "回答しない" }
 ];
 
+type RegistrationMode = "select" | "new" | "legacy";
+
+type LegacyLookupStatus = {
+  text: string;
+  tone: "idle" | "loading" | "success" | "error";
+};
+
+type LegacyLookupResult = {
+  member?: {
+    area: MemberProfile["area"];
+    birthDate: string;
+    claimed: boolean;
+    claimedAt: string | null;
+    email: string;
+    fullName: string;
+    furigana: string;
+    gender: Gender;
+    memberId: string;
+    municipality: string;
+    phone: string;
+    pickleballExperience: string;
+    prefecture: string;
+    residenceScope: ResidenceScope;
+  };
+  message?: string;
+  ok?: boolean;
+};
+
 export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [createdMember, setCreatedMember] = useState<MemberProfile | null>(null);
+  const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("select");
   const [memberId, setMemberId] = useState("");
   const [legacyMemberNumber, setLegacyMemberNumber] = useState("");
+  const [legacyBirthDate, setLegacyBirthDate] = useState("");
+  const [legacyPhoneLast4, setLegacyPhoneLast4] = useState("");
+  const [verifiedLegacyMemberId, setVerifiedLegacyMemberId] = useState("");
+  const [legacyLookup, setLegacyLookup] = useState<LegacyLookupStatus>({ text: "", tone: "idle" });
+  const [fullName, setFullName] = useState("");
+  const [furigana, setFurigana] = useState("");
+  const [gender, setGender] = useState<Gender>("no_answer");
+  const [birthDate, setBirthDate] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [residenceScope, setResidenceScope] = useState<ResidenceScope>("okinawa");
+  const [municipality, setMunicipality] = useState(okinawaMunicipalities[0]);
   const [supabaseReady, setSupabaseReady] = useState(isSupabaseConfigured);
 
   useEffect(() => {
@@ -31,31 +71,151 @@ export default function RegisterPage() {
     getSupabaseConfigStatus().then((status) => setSupabaseReady(status.isConfigured));
   }, []);
 
+  function resetFormValues(mode: RegistrationMode) {
+    setMessage("");
+    setCreatedMember(null);
+    setLegacyLookup({ text: "", tone: "idle" });
+    setFullName("");
+    setFurigana("");
+    setGender("no_answer");
+    setBirthDate("");
+    setPhone("");
+    setEmail("");
+    setResidenceScope("okinawa");
+    setMunicipality(okinawaMunicipalities[0]);
+    setVerifiedLegacyMemberId("");
+    setLegacyBirthDate("");
+    setLegacyPhoneLast4("");
+    if (mode !== "legacy") {
+      setLegacyMemberNumber("");
+    }
+  }
+
+  function clearLegacyMemberDetails() {
+    setVerifiedLegacyMemberId("");
+    setFullName("");
+    setFurigana("");
+    setGender("no_answer");
+    setBirthDate("");
+    setPhone("");
+    setEmail("");
+    setResidenceScope("okinawa");
+    setMunicipality(okinawaMunicipalities[0]);
+  }
+
+  function selectRegistrationMode(mode: RegistrationMode) {
+    setRegistrationMode(mode);
+    resetFormValues(mode);
+    if (mode === "new") {
+      setMemberId(generateMemberId());
+    }
+  }
+
+  async function lookupLegacyMember(numberValue = legacyMemberNumber) {
+    const normalizedNumber = normalizeMemberNumber(numberValue);
+    const normalizedPhoneLast4 = normalizeMemberNumber(legacyPhoneLast4).slice(-4);
+    setLegacyMemberNumber(normalizedNumber);
+    setMessage("");
+
+    if (normalizedNumber.length !== 4) {
+      setLegacyLookup({ text: "L列のOKP番号4桁を入力してください。例: 0001", tone: "error" });
+      return;
+    }
+
+    if (!legacyBirthDate && normalizedPhoneLast4.length !== 4) {
+      clearLegacyMemberDetails();
+      setLegacyLookup({ text: "本人確認のため、生年月日または電話番号下4桁を入力してください。", tone: "error" });
+      return;
+    }
+
+    setLegacyLookup({ text: "既存会員情報を確認しています。", tone: "loading" });
+
+    try {
+      const response = await fetch("/api/legacy-members/lookup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          birthDate: legacyBirthDate,
+          memberNumber: normalizedNumber,
+          phoneLast4: normalizedPhoneLast4
+        })
+      });
+      const result = (await response.json()) as LegacyLookupResult;
+
+      if (!response.ok || !result.ok || !result.member) {
+        throw new Error(result.message ?? "既存会員情報を取得できませんでした。");
+      }
+
+      setFullName(result.member.fullName);
+      setFurigana(result.member.furigana);
+      setGender(result.member.gender);
+      setBirthDate(result.member.birthDate);
+      setPhone(result.member.phone);
+      setEmail(result.member.email);
+      setResidenceScope(result.member.residenceScope);
+      setMunicipality(result.member.municipality || okinawaMunicipalities[0]);
+      setLegacyMemberNumber(result.member.memberId.replace("OKP-", ""));
+      setVerifiedLegacyMemberId(result.member.memberId);
+      setLegacyLookup({
+        text: result.member.claimed
+          ? "この番号は既にアプリ登録済みの可能性があります。登録できない場合は管理者へ確認してください。"
+          : "既存会員情報を反映しました。不足情報とパスワードを入力してください。",
+        tone: result.member.claimed ? "error" : "success"
+      });
+    } catch (error) {
+      clearLegacyMemberDetails();
+      setLegacyLookup({
+        text: error instanceof Error ? error.message : "既存会員情報を取得できませんでした。",
+        tone: "error"
+      });
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
 
     const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email"));
     const password = String(formData.get("password"));
-    const legacyMemberNumber = normalizeMemberNumber(String(formData.get("legacyMemberNumber") ?? ""));
-    const requestedLegacyMemberId = legacyMemberNumber ? formatLegacyMemberId(legacyMemberNumber) : "";
-    const municipality = residenceScope === "okinawa" ? String(formData.get("municipality") ?? "") : "";
-    const area = residenceScope === "okinawa" ? municipalityToArea(municipality) : "other";
+    const normalizedLegacyMemberNumber = registrationMode === "legacy" ? normalizeMemberNumber(legacyMemberNumber) : "";
+    const requestedLegacyMemberId = normalizedLegacyMemberNumber ? formatLegacyMemberId(normalizedLegacyMemberNumber) : "";
+    const selectedMunicipality = residenceScope === "okinawa" ? municipality : "";
+    const area = residenceScope === "okinawa" ? municipalityToArea(selectedMunicipality) : "other";
     const issuedMemberId = requestedLegacyMemberId || memberId || generateMemberId();
+
+    if (registrationMode === "legacy" && normalizedLegacyMemberNumber.length !== 4) {
+      setMessage("番号引き継ぎの方は、L列のOKP番号4桁を入力して照合してください。");
+      setLoading(false);
+      return;
+    }
+
+    if (registrationMode === "legacy" && verifiedLegacyMemberId !== requestedLegacyMemberId) {
+      setMessage("番号引き継ぎの方は、会員番号と本人確認情報を照合してから登録してください。");
+      setLoading(false);
+      return;
+    }
+
+    if (!fullName || !furigana || !email || !password) {
+      setMessage("氏名、ふりがな、メールアドレス、パスワードを入力してください。");
+      setLoading(false);
+      return;
+    }
+
     const profile: MemberProfile = {
       id: "local-preview",
       memberId: issuedMemberId,
-      fullName: String(formData.get("fullName")),
-      furigana: String(formData.get("furigana")),
-      gender: String(formData.get("gender")) as Gender,
-      birthDate: String(formData.get("birthDate")),
-      phone: String(formData.get("phone")),
+      fullName,
+      furigana,
+      gender,
+      birthDate,
+      phone,
       email,
       area,
       residenceScope,
-      municipality,
+      municipality: selectedMunicipality,
       role: "member",
       opr: 0,
       ranking: 0
@@ -71,46 +231,39 @@ export default function RegisterPage() {
         area: profile.area,
         residence_scope: profile.residenceScope,
         municipality: profile.municipality,
-        legacy_member_id: requestedLegacyMemberId || null
+        legacy_birth_date: registrationMode === "legacy" ? legacyBirthDate || null : null,
+        legacy_member_id: requestedLegacyMemberId || null,
+        legacy_phone_last4: registrationMode === "legacy" ? normalizeMemberNumber(legacyPhoneLast4).slice(-4) || null : null
       };
-      const supabase = await getSupabaseClient();
 
-      if (supabase) {
-        const { error } = await supabase.auth.signUp({
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
           email,
+          legacyVerification:
+            registrationMode === "legacy"
+              ? {
+                  birthDate: legacyBirthDate || null,
+                  memberNumber: requestedLegacyMemberId,
+                  phoneLast4: normalizeMemberNumber(legacyPhoneLast4).slice(-4) || null
+                }
+              : undefined,
           password,
-          options: {
-            data: metadata
-          }
-        });
+          metadata
+        })
+      });
+      const result = (await response.json()) as { ok?: boolean; message?: string };
 
-        if (error) throw error;
-
-        setSupabaseReady(true);
-        setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
-      } else {
-        const response = await fetch("/api/register", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            email,
-            password,
-            metadata
-          })
-        });
-        const result = (await response.json()) as { ok?: boolean; message?: string };
-
-        if (!response.ok || !result.ok) {
-          throw new Error(result.message ?? "Supabase登録APIでエラーが発生しました。");
-        }
-
-        setSupabaseReady(true);
-        setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message ?? "Supabase登録APIでエラーが発生しました。");
       }
 
-      setCreatedMember(requestedLegacyMemberId ? profile : null);
+      setSupabaseReady(true);
+      setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
+      setCreatedMember(profile);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "登録中にエラーが発生しました。");
     } finally {
@@ -124,20 +277,167 @@ export default function RegisterPage() {
       title="会員登録"
       description="氏名、ふりがな、連絡先、居住地を登録し、会員IDとQRコード会員証を発行します。"
     >
+      {registrationMode === "select" ? (
+        <div className="grid gap-5 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => selectRegistrationMode("new")}
+            className="focus-ring rounded-lg border border-ocean-100 bg-white p-6 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-ocean-300"
+          >
+            <span className="grid size-12 place-items-center rounded-full bg-ocean-50 text-ocean-700">
+              <UserPlus className="size-6" aria-hidden="true" />
+            </span>
+            <span className="mt-5 block text-2xl font-black text-ink">新規の方</span>
+            <span className="mt-3 block text-sm leading-7 text-slate-600">
+              まだOKP番号を持っていない方はこちら。新しい会員IDを発行して登録します。
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => selectRegistrationMode("legacy")}
+            className="focus-ring rounded-lg border border-ocean-100 bg-white p-6 text-left shadow-soft transition hover:-translate-y-0.5 hover:border-coral-300"
+          >
+            <span className="grid size-12 place-items-center rounded-full bg-coral-100 text-coral-600">
+              <CheckCircle2 className="size-6" aria-hidden="true" />
+            </span>
+            <span className="mt-5 block text-2xl font-black text-ink">番号引き継ぐ方</span>
+            <span className="mt-3 block text-sm leading-7 text-slate-600">
+              Googleフォームで発行済みのOKP番号がある方はこちら。L列の4桁番号と本人確認で情報を反映します。
+            </span>
+          </button>
+        </div>
+      ) : (
       <div className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
         <form onSubmit={handleSubmit} className="rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-coral-600">
+                {registrationMode === "legacy" ? "Existing Member" : "New Member"}
+              </p>
+              <h2 className="mt-1 text-2xl font-black text-ink">
+                {registrationMode === "legacy" ? "番号を引き継いで登録" : "新規会員登録"}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => selectRegistrationMode("select")}
+              className="focus-ring rounded-md bg-ocean-50 px-4 py-2 text-sm font-black text-ocean-700 hover:bg-ocean-100"
+            >
+              選択へ戻る
+            </button>
+          </div>
+          {registrationMode === "legacy" ? (
+            <div className="mb-5 rounded-lg border border-coral-200 bg-coral-100 p-4">
+              <label className="grid gap-2 text-sm font-bold text-coral-700">
+                L列のOKP番号4桁
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    required
+                    name="legacyMemberNumber"
+                    value={legacyMemberNumber}
+                    onChange={(event) => {
+                      const nextNumber = normalizeMemberNumber(event.target.value).slice(0, 4);
+                      setLegacyMemberNumber(nextNumber);
+                      setLegacyLookup({ text: "", tone: "idle" });
+                      clearLegacyMemberDetails();
+                      if (nextNumber.length === 4 && (legacyBirthDate || normalizeMemberNumber(legacyPhoneLast4).length === 4)) {
+                        lookupLegacyMember(nextNumber);
+                      }
+                    }}
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    className="focus-ring rounded-md border border-coral-200 px-3 py-3 text-ink"
+                    placeholder="例: 0001"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => lookupLegacyMember()}
+                    disabled={legacyLookup.tone === "loading"}
+                    className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {legacyLookup.tone === "loading" ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
+                    情報を反映
+                  </button>
+                </div>
+              </label>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2 text-sm font-bold text-coral-700">
+                  本人確認: 生年月日
+                  <input
+                    type="date"
+                    value={legacyBirthDate}
+                    onChange={(event) => {
+                      setLegacyBirthDate(event.target.value);
+                      setLegacyLookup({ text: "", tone: "idle" });
+                      clearLegacyMemberDetails();
+                    }}
+                    className="focus-ring rounded-md border border-coral-200 px-3 py-3 text-ink"
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-coral-700">
+                  本人確認: 電話番号下4桁
+                  <input
+                    value={legacyPhoneLast4}
+                    onChange={(event) => {
+                      setLegacyPhoneLast4(normalizeMemberNumber(event.target.value).slice(0, 4));
+                      setLegacyLookup({ text: "", tone: "idle" });
+                      clearLegacyMemberDetails();
+                    }}
+                    inputMode="numeric"
+                    maxLength={4}
+                    pattern="[0-9]{4}"
+                    className="focus-ring rounded-md border border-coral-200 px-3 py-3 text-ink"
+                    placeholder="例: 1234"
+                  />
+                </label>
+              </div>
+              {legacyLookup.text ? (
+                <p
+                  className={`mt-3 text-sm font-bold leading-6 ${
+                    legacyLookup.tone === "error" ? "text-coral-700" : legacyLookup.tone === "success" ? "text-palm-700" : "text-ocean-700"
+                  }`}
+                >
+                  {legacyLookup.text}
+                </p>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-coral-700">
+                  例: OKP-0001 の方は 0001 と入力し、生年月日または電話番号下4桁で本人確認してください。照合に成功するまで個人情報は表示されません。
+                </p>
+              )}
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               氏名
-              <input required name="fullName" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="沖縄 花子" />
+              <input
+                required
+                name="fullName"
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                placeholder="沖縄 花子"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               ふりがな
-              <input required name="furigana" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="おきなわ はなこ" />
+              <input
+                required
+                name="furigana"
+                value={furigana}
+                onChange={(event) => setFurigana(event.target.value)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                placeholder="おきなわ はなこ"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               性別
-              <select required name="gender" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+              <select
+                required
+                name="gender"
+                value={gender}
+                onChange={(event) => setGender(event.target.value as Gender)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+              >
                 {genderOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -147,11 +447,24 @@ export default function RegisterPage() {
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               生年月日
-              <input name="birthDate" type="date" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" />
+              <input
+                name="birthDate"
+                type="date"
+                value={birthDate}
+                onChange={(event) => setBirthDate(event.target.value)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               電話番号
-              <input name="phone" type="tel" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="090-0000-0000" />
+              <input
+                name="phone"
+                type="tel"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                placeholder="090-0000-0000"
+              />
             </label>
             <div className="grid gap-2 text-sm font-bold text-slate-700">
               居住地
@@ -160,7 +473,14 @@ export default function RegisterPage() {
                   <button
                     key={scope}
                     type="button"
-                    onClick={() => setResidenceScope(scope)}
+                    onClick={() => {
+                      setResidenceScope(scope);
+                      if (scope === "outside") {
+                        setMunicipality("");
+                      } else if (!municipality) {
+                        setMunicipality(okinawaMunicipalities[0]);
+                      }
+                    }}
                     className={`focus-ring rounded-md px-3 py-3 text-sm font-black ${
                       residenceScope === scope ? "bg-white text-ink shadow" : "text-slate-600"
                     }`}
@@ -173,7 +493,13 @@ export default function RegisterPage() {
             {residenceScope === "okinawa" ? (
               <label className="grid gap-2 text-sm font-bold text-slate-700">
                 市町村
-                <select required name="municipality" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+                <select
+                  required
+                  name="municipality"
+                  value={municipality}
+                  onChange={(event) => setMunicipality(event.target.value)}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                >
                   {okinawaMunicipalities.map((municipalityName) => (
                     <option key={municipalityName} value={municipalityName}>
                       {municipalityName}
@@ -188,37 +514,32 @@ export default function RegisterPage() {
             )}
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               メールアドレス
-              <input required name="email" type="email" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="member@example.com" />
+              <input
+                required
+                name="email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                placeholder="member@example.com"
+              />
             </label>
             <label className="grid gap-2 text-sm font-bold text-slate-700">
               パスワード
               <input required name="password" type="password" minLength={8} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="8文字以上" />
             </label>
-            <label className="grid gap-2 text-sm font-bold text-slate-700 sm:col-span-2">
-              Googleフォームで発行済みの会員番号
-              <input
-                name="legacyMemberNumber"
-                value={legacyMemberNumber}
-                onChange={(event) => setLegacyMemberNumber(normalizeMemberNumber(event.target.value))}
-                inputMode="numeric"
-                pattern="[0-9]*"
-                className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
-                placeholder="例: 0001"
-              />
-              <span className="text-xs leading-5 text-slate-500">
-                既にGoogleフォームで会員登録済みの方だけ、番号のみ入力してください。Supabase側では登録メールアドレスと照合して、この番号を引き継ぎます。
-              </span>
-            </label>
           </div>
 
           <div className="mt-5 rounded-md bg-ocean-50 p-4">
             <p className="text-sm font-bold text-ocean-700">
-              {legacyMemberNumber ? "引き継ぐGoogleフォーム番号" : "新規発行予定の会員ID"}
+              {registrationMode === "legacy" ? "引き継ぐ会員ID" : "新規発行予定の会員ID"}
             </p>
-            <p className="mt-1 text-2xl font-black text-ink">{legacyMemberNumber || memberId}</p>
-            {legacyMemberNumber ? (
+            <p className="mt-1 text-2xl font-black text-ink">
+              {registrationMode === "legacy" && legacyMemberNumber ? formatLegacyMemberId(legacyMemberNumber) : memberId}
+            </p>
+            {registrationMode === "legacy" ? (
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                登録時は自動で既存会員IDに変換して照合します。
+                生年月日または電話番号下4桁で本人確認し、この番号を引き継ぎます。
               </p>
             ) : (
               <p className="mt-2 text-xs leading-5 text-slate-500">
@@ -271,6 +592,7 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
+      )}
     </PageShell>
   );
 }

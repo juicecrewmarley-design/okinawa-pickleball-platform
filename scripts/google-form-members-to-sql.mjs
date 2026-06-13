@@ -26,7 +26,76 @@ if (records.length === 0) {
   process.exit(1);
 }
 
-const values = records.map((record) => {
+const insertHeader = `insert into public.legacy_members (
+  member_id,
+  email,
+  full_name,
+  furigana,
+  gender,
+  birth_date,
+  phone,
+  residence_scope,
+  area,
+  prefecture,
+  municipality,
+  region_text,
+  pickleball_experience,
+  form_timestamp,
+  source
+) values`;
+
+const upsertFooter = `on conflict (member_id) do update set
+  email = excluded.email,
+  full_name = excluded.full_name,
+  furigana = excluded.furigana,
+  gender = excluded.gender,
+  birth_date = excluded.birth_date,
+  phone = excluded.phone,
+  residence_scope = excluded.residence_scope,
+  area = excluded.area,
+  prefecture = excluded.prefecture,
+  municipality = excluded.municipality,
+  region_text = excluded.region_text,
+  pickleball_experience = excluded.pickleball_experience,
+  form_timestamp = excluded.form_timestamp,
+  source = excluded.source,
+  updated_at = now();`;
+
+const output = `-- Googleフォーム既存会員インポートSQL
+-- Generated from: ${basename(inputPath)}
+-- Rows: ${records.length}
+
+alter table public.legacy_members drop constraint if exists legacy_members_email_key;
+
+${buildInsertBlocks(records)}
+
+select public.sync_member_id_sequence();
+
+select count(*) from public.legacy_members;
+`;
+
+writeFileSync(outputPath, output, "utf8");
+console.log(`Created ${outputPath}`);
+console.log(`Imported rows: ${records.length}`);
+
+function buildInsertBlocks(recordsToInsert) {
+  const blocks = [];
+
+  for (let index = 0; index < recordsToInsert.length; index += 50) {
+    const blockRecords = recordsToInsert.slice(index, index + 50);
+    const values = blockRecords.map(recordToSqlRow);
+    const startId = blockRecords[0]?.member_id ?? "";
+    const endId = blockRecords[blockRecords.length - 1]?.member_id ?? "";
+
+    blocks.push(`${insertHeader} -- ${startId} to ${endId}
+${values.join(",\n")}
+${upsertFooter}`);
+  }
+
+  return blocks.join("\n\n");
+}
+
+function recordToSqlRow(record) {
   return `(${[
     sql(record.member_id),
     sql(record.email),
@@ -44,53 +113,7 @@ const values = records.map((record) => {
     sql(record.form_timestamp),
     sql(`google_form:${basename(inputPath)}`)
   ].join(", ")})`;
-});
-
-const output = `-- Googleフォーム既存会員インポートSQL
--- Generated from: ${basename(inputPath)}
--- Rows: ${records.length}
-
-insert into public.legacy_members (
-  member_id,
-  email,
-  full_name,
-  furigana,
-  gender,
-  birth_date,
-  phone,
-  residence_scope,
-  area,
-  prefecture,
-  municipality,
-  region_text,
-  pickleball_experience,
-  form_timestamp,
-  source
-) values
-${values.join(",\n")}
-on conflict (member_id) do update set
-  email = excluded.email,
-  full_name = excluded.full_name,
-  furigana = excluded.furigana,
-  gender = excluded.gender,
-  birth_date = excluded.birth_date,
-  phone = excluded.phone,
-  residence_scope = excluded.residence_scope,
-  area = excluded.area,
-  prefecture = excluded.prefecture,
-  municipality = excluded.municipality,
-  region_text = excluded.region_text,
-  pickleball_experience = excluded.pickleball_experience,
-  form_timestamp = excluded.form_timestamp,
-  source = excluded.source,
-  updated_at = now();
-
-select public.sync_member_id_sequence();
-`;
-
-writeFileSync(outputPath, output, "utf8");
-console.log(`Created ${outputPath}`);
-console.log(`Imported rows: ${records.length}`);
+}
 
 function rowToRecord(headers, row) {
   const get = (label) => row[headers.indexOf(label)]?.trim() ?? "";
