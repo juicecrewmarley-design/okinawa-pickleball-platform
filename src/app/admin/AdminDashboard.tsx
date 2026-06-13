@@ -37,6 +37,7 @@ type AdminApiResult = {
 
 export default function AdminDashboard() {
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
 
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
@@ -53,9 +54,18 @@ export default function AdminDashboard() {
         throw new Error(result.message ?? "保存できませんでした。");
       }
 
+      setMessageTone("success");
       setMessage(result.message ?? fallbackMessage);
+      return true;
     } catch (error) {
+      console.error("Admin form save failed", {
+        endpoint,
+        error,
+        payload
+      });
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "保存中にエラーが発生しました。");
+      return false;
     }
   }
 
@@ -104,7 +114,10 @@ export default function AdminDashboard() {
       status: "open"
     };
 
-    await postAdminForm("/api/admin/tournaments", payload, "大会を作成しました。");
+    const saved = await postAdminForm("/api/admin/tournaments", payload, "大会を保存しました");
+    if (saved) {
+      event.currentTarget.reset();
+    }
   }
 
   async function handleNoticeSubmit(event: FormEvent<HTMLFormElement>) {
@@ -169,7 +182,15 @@ export default function AdminDashboard() {
         })}
       </nav>
 
-      {message ? <p className="mb-5 rounded-md bg-palm-100 px-4 py-3 text-sm font-bold text-palm-700">{message}</p> : null}
+      {message ? (
+        <p
+          className={`mb-5 rounded-md px-4 py-3 text-sm font-bold ${
+            messageTone === "success" ? "bg-palm-100 text-palm-700" : "bg-coral-100 text-coral-700"
+          }`}
+        >
+          {message}
+        </p>
+      ) : null}
 
       <div className="space-y-6">
         <section id="members" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">

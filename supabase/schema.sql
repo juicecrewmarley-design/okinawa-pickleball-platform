@@ -539,9 +539,18 @@ alter table public.notices enable row level security;
 alter table public.sponsors enable row level security;
 alter table public.sponsor_contacts enable row level security;
 
+grant usage on schema public to anon, authenticated;
+grant select on public.tournaments to anon, authenticated;
+grant insert, update, delete on public.tournaments to authenticated;
+
 drop policy if exists "profiles select own or admin" on public.profiles;
 drop policy if exists "profiles insert own" on public.profiles;
 drop policy if exists "profiles update own or admin" on public.profiles;
+drop policy if exists "tournaments public select" on public.tournaments;
+drop policy if exists "tournaments admin write" on public.tournaments;
+drop policy if exists "tournaments admin insert" on public.tournaments;
+drop policy if exists "tournaments admin update" on public.tournaments;
+drop policy if exists "tournaments admin delete" on public.tournaments;
 
 create policy "profiles select own or admin"
 on public.profiles for select
@@ -569,10 +578,21 @@ create policy "tournaments public select"
 on public.tournaments for select
 using (status in ('open', 'closed', 'finished') or public.is_admin());
 
-create policy "tournaments admin write"
-on public.tournaments for all
+create policy "tournaments admin insert"
+on public.tournaments for insert
+to authenticated
+with check (public.is_admin());
+
+create policy "tournaments admin update"
+on public.tournaments for update
+to authenticated
 using (public.is_admin())
 with check (public.is_admin());
+
+create policy "tournaments admin delete"
+on public.tournaments for delete
+to authenticated
+using (public.is_admin());
 
 create policy "entries select own or admin"
 on public.tournament_entries for select
