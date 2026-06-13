@@ -75,7 +75,6 @@ Copy-Item .env.local.example .env.local
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-NEXT_PUBLIC_ADMIN_EMAILS=admin@example.com
 ```
 
 Supabaseをまだ設定しない場合でも、サンプルデータで画面プレビューできます。
@@ -123,10 +122,16 @@ npm run import:legacy-members -- .\google-form-members.csv
 
 ## 管理者権限
 
-Supabase上の`profiles.role`を`admin`にすると管理者扱いです。初回はSupabase SQLエディタで対象ユーザーのroleを変更してください。
+管理者は `juicecrewmarley@yahoo.co.jp` の1名のみです。Supabase Authでこのメールアドレスのユーザーを作成した後、Supabase SQL Editorで以下のSQLファイルを実行してください。
 
-```sql
-update public.profiles
-set role = 'admin'
-where email = 'admin@example.com';
+```text
+supabase/grant-admin.sql
+```
+
+このSQLは、`auth.users` から `juicecrewmarley@yahoo.co.jp` を探し、`public.profiles` に行がなければ作成し、`role='admin'` に更新します。最後に `email` と `role` を確認するSELECTも実行します。
+
+大会作成がRLSで拒否される場合は、続けて以下もSQL Editorで実行してください。
+
+```text
+supabase/admin-tournament-saving.sql
 ```

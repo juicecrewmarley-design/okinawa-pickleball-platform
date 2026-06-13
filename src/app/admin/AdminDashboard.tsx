@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Bell, Building2, CalendarPlus, ClipboardList, Medal, Save, Shield, Trophy, Users } from "lucide-react";
+import { Bell, Building2, CalendarPlus, ClipboardList, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
 import { entries, mockMember, tournaments } from "@/lib/mock-data";
@@ -38,6 +38,7 @@ type AdminApiResult = {
 export default function AdminDashboard() {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+  const [savingAction, setSavingAction] = useState<string | null>(null);
 
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
@@ -71,9 +72,36 @@ export default function AdminDashboard() {
 
   async function handleTournamentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
+    console.log("tournament save clicked");
+    setMessageTone("success");
+    setMessage("保存処理を開始しました");
 
     const formData = new FormData(event.currentTarget);
+    const title = String(formData.get("title") ?? "").trim();
+    const venue = String(formData.get("venue") ?? "").trim();
+    const startAt = String(formData.get("startAt") ?? "").trim();
+    const entryDeadline = String(formData.get("entryDeadline") ?? "").trim();
+    const memberFeeYenText = String(formData.get("memberFeeYen") ?? "").trim();
+    const guestFeeYenText = String(formData.get("guestFeeYen") ?? "").trim();
+    const defaultCapacityText = String(formData.get("defaultCapacity") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+    const missingFields = [
+      !title ? "大会名" : "",
+      !venue ? "会場" : "",
+      !startAt ? "開催日時" : "",
+      !entryDeadline ? "申込締切" : "",
+      !memberFeeYenText ? "会員参加費" : "",
+      !guestFeeYenText ? "非会員参加費" : "",
+      !defaultCapacityText ? "未入力時の定員" : "",
+      !description ? "説明" : ""
+    ].filter(Boolean);
+
+    if (missingFields.length > 0) {
+      setMessageTone("error");
+      setMessage(`不足している項目があります: ${missingFields.join("、")}`);
+      return;
+    }
+
     const categoryConfig: TournamentCategoryConfig = {
       doubles: {
         divisions: formData.getAll("doublesDivisions").map(String),
@@ -85,25 +113,32 @@ export default function AdminDashboard() {
       }
     };
     const categories = buildTournamentCategories(categoryConfig);
-    const defaultCapacity = Number(formData.get("defaultCapacity")) || 16;
+
+    if (categories.length === 0) {
+      setMessageTone("error");
+      setMessage("不足している項目があります: 大会カテゴリ");
+      return;
+    }
+
+    const defaultCapacity = Number(defaultCapacityText) || 16;
     const categoryCapacities = buildCategoryCapacities(
       categories,
       Object.fromEntries(categories.map((category) => [category, formData.get(capacityInputName(category))])),
       defaultCapacity
     );
-    const memberFeeYen = Number(formData.get("memberFeeYen"));
-    const guestFeeYen = Number(formData.get("guestFeeYen"));
+    const memberFeeYen = Number(memberFeeYenText);
+    const guestFeeYen = Number(guestFeeYenText);
     categoryConfig.categoryCapacities = categoryCapacities;
     categoryConfig.fees = {
       member: memberFeeYen,
       guest: guestFeeYen
     };
     const payload = {
-      title: String(formData.get("title")),
-      description: String(formData.get("description")),
-      venue: String(formData.get("venue")),
-      start_at: String(formData.get("startAt")),
-      entry_deadline: String(formData.get("entryDeadline")),
+      title,
+      description,
+      venue,
+      start_at: startAt,
+      entry_deadline: entryDeadline,
       fee_yen: memberFeeYen,
       member_fee_yen: memberFeeYen,
       guest_fee_yen: guestFeeYen,
@@ -114,7 +149,11 @@ export default function AdminDashboard() {
       status: "open"
     };
 
+    setSavingAction("tournament");
+    console.log("fetch /api/admin/tournaments");
     const saved = await postAdminForm("/api/admin/tournaments", payload, "大会を保存しました");
+    setSavingAction(null);
+
     if (saved) {
       event.currentTarget.reset();
     }
@@ -224,7 +263,7 @@ export default function AdminDashboard() {
         </section>
 
         <section id="tournaments" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
-          <form onSubmit={handleTournamentSubmit}>
+          <form noValidate onSubmit={handleTournamentSubmit}>
             <h2 className="text-2xl font-black">大会作成</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <AdminInput name="title" label="大会名" placeholder="沖縄オープン 2026" required />
@@ -263,7 +302,7 @@ export default function AdminDashboard() {
                 <textarea required name="description" rows={4} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="大会概要、対象者、持ち物など" />
               </label>
             </div>
-            <SaveButton label="大会を保存" />
+            <SaveButton label="大会を保存" loading={savingAction === "tournament"} />
           </form>
         </section>
 
@@ -480,11 +519,15 @@ function CheckboxGroup({
   );
 }
 
-function SaveButton({ label, icon }: { label: string; icon?: React.ReactNode }) {
+function SaveButton({ label, icon, loading }: { label: string; icon?: React.ReactNode; loading?: boolean }) {
   return (
-    <button className="focus-ring mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700">
-      {icon ?? <Save className="size-5" aria-hidden="true" />}
-      {label}
+    <button
+      type="submit"
+      disabled={loading}
+      className="focus-ring mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {loading ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : icon ?? <Save className="size-5" aria-hidden="true" />}
+      {loading ? "保存中..." : label}
     </button>
   );
 }
