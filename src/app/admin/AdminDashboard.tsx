@@ -3,9 +3,9 @@
 import { FormEvent, useState } from "react";
 import { Bell, Building2, CalendarPlus, ClipboardList, Medal, Save, Shield, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
+import { singleAdminEmail } from "@/lib/admin";
 import { entries, mockMember, tournaments } from "@/lib/mock-data";
 import { formatResidence } from "@/lib/okinawa";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
   buildCategoryCapacities,
   buildTournamentCategories,
@@ -29,8 +29,35 @@ function capacityInputName(category: string) {
   return `capacity:${category}`;
 }
 
+type AdminApiResult = {
+  id?: string;
+  message?: string;
+  ok?: boolean;
+};
+
 export default function AdminDashboard() {
   const [message, setMessage] = useState("");
+
+  async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = (await response.json()) as AdminApiResult;
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message ?? "保存できませんでした。");
+      }
+
+      setMessage(result.message ?? fallbackMessage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存中にエラーが発生しました。");
+    }
+  }
 
   async function handleTournamentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -77,12 +104,7 @@ export default function AdminDashboard() {
       status: "open"
     };
 
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("tournaments").insert(payload);
-      setMessage(error ? error.message : "大会を作成しました。");
-    } else {
-      setMessage("プレビュー環境のため、大会作成フォームの入力確認のみ完了しました。");
-    }
+    await postAdminForm("/api/admin/tournaments", payload, "大会を作成しました。");
   }
 
   async function handleNoticeSubmit(event: FormEvent<HTMLFormElement>) {
@@ -95,12 +117,7 @@ export default function AdminDashboard() {
       is_published: true
     };
 
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("notices").insert(payload);
-      setMessage(error ? error.message : "お知らせを投稿しました。");
-    } else {
-      setMessage("プレビュー環境のため、お知らせ投稿フォームの入力確認のみ完了しました。");
-    }
+    await postAdminForm("/api/admin/notices", payload, "お知らせを投稿しました。");
   }
 
   async function handleSponsorSubmit(event: FormEvent<HTMLFormElement>) {
@@ -110,16 +127,12 @@ export default function AdminDashboard() {
       company_name: String(formData.get("companyName")),
       description: String(formData.get("description")),
       website_url: String(formData.get("websiteUrl")),
+      logo_url: String(formData.get("logoUrl")),
       rank: String(formData.get("rank")),
       is_active: true
     };
 
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("sponsors").insert(payload);
-      setMessage(error ? error.message : "協賛企業を登録しました。");
-    } else {
-      setMessage("プレビュー環境のため、協賛企業登録フォームの入力確認のみ完了しました。");
-    }
+    await postAdminForm("/api/admin/sponsors", payload, "協賛企業を登録しました。");
   }
 
   function handleResultSubmit(event: FormEvent<HTMLFormElement>) {
@@ -136,7 +149,7 @@ export default function AdminDashboard() {
       <div className="mb-5 flex items-center gap-3 rounded-lg bg-ink p-4 text-white shadow-soft">
         <Shield className="size-6 text-coral-500" aria-hidden="true" />
         <p className="text-sm font-bold leading-6">
-          本番ではSupabase Authとprofiles.roleで管理者権限を確認します。RLSにより管理者だけが書き込みできます。
+          管理者は {singleAdminEmail} の1名のみです。大会作成、お知らせ投稿、協賛企業登録は管理者専用APIから保存します。
         </p>
       </div>
 

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { Loader2, LockKeyhole, Shield } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
+import { singleAdminEmail } from "@/lib/admin";
 
 export default function LoginPage() {
   const [mode, setMode] = useState<"member" | "admin">("member");
@@ -81,7 +82,7 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <label className="grid gap-2 text-sm font-bold text-slate-700">
             メールアドレス
-            <input required name="email" type="email" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder={mode === "admin" ? "admin@example.com" : "member@example.com"} />
+            <input required name="email" type="email" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder={mode === "admin" ? singleAdminEmail : "member@example.com"} />
           </label>
           <label className="grid gap-2 text-sm font-bold text-slate-700">
             パスワード

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { authCookieNames } from "@/lib/server-auth";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
+import { ensureProfileForUser } from "@/lib/profile-bootstrap";
 
 type LoginPayload = {
   email?: string;
@@ -71,17 +72,13 @@ export async function POST(request: Request) {
     }
   });
 
-  const { data: profile, error: profileError } = await authedSupabase
-    .from("profiles")
-    .select("role")
-    .eq("id", data.user.id)
-    .maybeSingle();
+  const profile = await ensureProfileForUser(authedSupabase, data.user);
 
-  if (profileError || !profile) {
+  if (!profile) {
     return NextResponse.json(
       {
         ok: false,
-        message: "プロフィールが見つかりません。Supabaseのprofilesテーブルとトリガーを確認してください。"
+        message: "プロフィールを作成できませんでした。Supabaseのprofilesテーブル、トリガー、RLSポリシーを確認してください。"
       },
       { status: 403 }
     );

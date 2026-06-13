@@ -1,9 +1,13 @@
 import { Filter, Search } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { TournamentCard } from "@/components/TournamentCard";
-import { tournaments } from "@/lib/mock-data";
+import { getPublicTournaments } from "@/lib/public-data";
 
-export default function TournamentsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function TournamentsPage() {
+  const tournaments = await getPublicTournaments();
+
   return (
     <PageShell
       eyebrow="Tournaments"

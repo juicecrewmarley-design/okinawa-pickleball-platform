@@ -1,12 +1,20 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Building2, CalendarDays, IdCard, Trophy, Users } from "lucide-react";
-import { notices, rankings, sponsors, tournaments } from "@/lib/mock-data";
+import { rankings } from "@/lib/mock-data";
+import { getPublicNotices, getPublicSponsors, getPublicTournaments } from "@/lib/public-data";
 import { StatCard } from "@/components/StatCard";
 import { TournamentCard } from "@/components/TournamentCard";
 import { RankingTable } from "@/components/RankingTable";
 
-export default function HomePage() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const [tournaments, notices, sponsors] = await Promise.all([
+    getPublicTournaments(),
+    getPublicNotices(),
+    getPublicSponsors()
+  ]);
   const openTournaments = tournaments.filter((tournament) => tournament.status === "open").slice(0, 2);
 
   return (

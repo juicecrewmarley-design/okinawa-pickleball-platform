@@ -1,6 +1,6 @@
 import { Bell, CalendarDays, Dumbbell, Megaphone } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
-import { notices } from "@/lib/mock-data";
+import { getPublicNotices } from "@/lib/public-data";
 
 const noticeIcon = {
   event: CalendarDays,
@@ -16,7 +16,11 @@ const noticeLabel = {
   association: "協会からのお知らせ"
 };
 
-export default function NoticesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function NoticesPage() {
+  const notices = await getPublicNotices();
+
   return (
     <PageShell
       eyebrow="News"

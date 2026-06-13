@@ -1,26 +1,66 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatYen } from "@/lib/member";
-import { tournaments } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { defaultTournamentCategoryConfig, getCategoryCapacity, sumCategoryCapacities } from "@/lib/tournament-categories";
+import type { Tournament } from "@/types/domain";
 
 type EntryType = "doubles" | "team";
 type ApplicantType = "member" | "guest";
 
+type TournamentApiResult = {
+  tournament?: Tournament | null;
+};
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export default function TournamentDetailPage() {
   const params = useParams<{ id: string }>();
-  const tournament = useMemo(() => tournaments.find((item) => item.id === params.id), [params.id]);
+  const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [tournamentLoading, setTournamentLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [entryType, setEntryType] = useState<EntryType>("doubles");
   const [applicantType, setApplicantType] = useState<ApplicantType>("member");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadTournament() {
+      setTournamentLoading(true);
+
+      try {
+        const response = await fetch(`/api/tournaments/${params.id}`, { cache: "no-store" });
+        const result = (await response.json()) as TournamentApiResult;
+
+        if (active) {
+          setTournament(result.tournament ?? null);
+        }
+      } catch {
+        if (active) {
+          setTournament(null);
+        }
+      } finally {
+        if (active) {
+          setTournamentLoading(false);
+        }
+      }
+    }
+
+    loadTournament();
+
+    return () => {
+      active = false;
+    };
+  }, [params.id]);
 
   const categoryConfig = tournament?.categoryConfig ?? defaultTournamentCategoryConfig;
   const categoryCapacities = tournament?.categoryCapacities ?? categoryConfig.categoryCapacities;
@@ -64,7 +104,7 @@ export default function TournamentDetailPage() {
     const entryLabel = entryType === "team" && teamName ? `${category} / ${teamName}` : category;
 
     try {
-      if (isSupabaseConfigured && supabase) {
+      if (isSupabaseConfigured && supabase && isUuid(tournament.id)) {
         const { data: sessionData } = await supabase.auth.getSession();
         const userId = sessionData.session?.user.id;
 
@@ -104,6 +144,16 @@ export default function TournamentDetailPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (tournamentLoading) {
+    return (
+      <PageShell title="大会を読み込み中" description="大会情報を確認しています。">
+        <p className="rounded-lg border border-ocean-100 bg-white p-5 text-sm font-bold text-slate-600 shadow-soft">
+          少しお待ちください。
+        </p>
+      </PageShell>
+    );
   }
 
   if (!tournament) {

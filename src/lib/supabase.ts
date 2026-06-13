@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { isSingleAdminEmail } from "@/lib/admin";
 
 export const supabaseEnvNames = {
   url: "NEXT_PUBLIC_SUPABASE_URL",
@@ -86,6 +87,5 @@ export async function getSupabaseClient() {
 }
 
 export function isAdminEmail(email?: string | null) {
-  const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(",").map((item) => item.trim().toLowerCase()) ?? [];
-  return Boolean(email && adminEmails.includes(email.toLowerCase()));
+  return isSingleAdminEmail(email);
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getEffectiveProfileRole } from "@/lib/admin";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
 import type { MemberRole } from "@/types/domain";
 
@@ -15,7 +16,13 @@ export type ServerAuthProfile = {
   role: MemberRole;
 };
 
-export async function getServerAuthProfile(): Promise<ServerAuthProfile | null> {
+export type ServerAuthContext = {
+  accessToken: string;
+  profile: ServerAuthProfile;
+  supabase: SupabaseClient;
+};
+
+export async function getServerAuthContext(): Promise<ServerAuthContext | null> {
   const config = getSupabaseServerConfig();
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(authCookieNames.accessToken)?.value;
@@ -51,9 +58,20 @@ export async function getServerAuthProfile(): Promise<ServerAuthProfile | null> 
     return null;
   }
 
+  const email = userData.user.email ?? profile.email;
+
   return {
-    email: profile.email,
-    id: profile.id,
-    role: profile.role
+    accessToken,
+    profile: {
+      email,
+      id: profile.id,
+      role: getEffectiveProfileRole(email, profile.role)
+    },
+    supabase
   };
+}
+
+export async function getServerAuthProfile(): Promise<ServerAuthProfile | null> {
+  const context = await getServerAuthContext();
+  return context?.profile ?? null;
 }

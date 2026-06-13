@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Building2 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
-import { sponsors } from "@/lib/mock-data";
+import { getPublicSponsors } from "@/lib/public-data";
 
 const rankLabel = {
   platinum: "プラチナ",
@@ -11,7 +11,11 @@ const rankLabel = {
   supporter: "サポーター"
 };
 
-export default function SponsorsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function SponsorsPage() {
+  const sponsors = await getPublicSponsors();
+
   return (
     <PageShell
       eyebrow="Sponsors"
