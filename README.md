@@ -150,6 +150,116 @@ supabase/grant-admin.sql
 supabase/admin-tournament-saving.sql
 ```
 
+## 本番メール設定手順
+
+Supabase Authの標準メール送信は検証・開発向けです。本番で30名以上が短時間に登録する場合は、独自SMTPを設定してください。独自SMTPを設定しないと、確認メールが `email rate limit exceeded` で止まることがあります。
+
+おすすめはResendです。理由は、Supabase向けSMTP手順が分かりやすく、設定項目が少なく、確認メールのようなトランザクションメールに向いているためです。
+
+サービス比較:
+
+| サービス | 向いている用途 | メリット | 注意点 |
+| --- | --- | --- | --- |
+| Resend | 初心者、本番Authメール、小〜中規模運用 | Supabase SMTP設定が簡単。APIキーをSMTPパスワードとして使える。管理画面が分かりやすい。 | 独自ドメイン認証が必要。送信数が増える場合はプランとレート制限を事前確認する。 |
+| SendGrid | 大量送信、細かい分析、将来的な拡張 | 実績が多く、SMTP/API/ログ機能が豊富。 | 初期設定や送信者認証の項目が多く、初心者には少し複雑。 |
+| Gmail SMTP | 少人数テスト、既存Google Workspace利用 | 既存メールアドレスを使いやすい。 | 本番Authメールには非推奨。送信上限やアプリパスワード、組織設定の制約を受ける。 |
+
+### Resendで独自SMTPを設定する
+
+1. Resendにログインします。
+2. `Domains` で協会の送信用ドメインを追加します。例: `okinawa-pickleball.jp` または `auth.okinawa-pickleball.jp`
+3. Resendに表示されるDNSレコードを、ドメイン管理会社のDNS設定へ追加します。
+4. Resend側でドメインが `Verified` になるまで待ちます。
+5. ResendでAPI Keyを作成します。
+6. Supabase Dashboardを開き、対象プロジェクトを選びます。
+7. 左メニューの `Authentication` を開きます。
+8. `Email` または `Emails` の設定画面を開きます。
+9. `SMTP Settings` を開き、独自SMTPを有効にします。
+10. 以下を入力します。
+
+```text
+Sender email: no-reply@okinawa-pickleball.jp
+Sender name: 沖縄県ピックルボール協会
+SMTP host: smtp.resend.com
+SMTP port: 465
+SMTP username: resend
+SMTP password: ResendのAPI Key
+```
+
+11. 保存します。
+12. Supabaseの `Authentication` → `Rate Limits` を開き、メール送信上限を本番登録数に合わせて調整します。30名以上が一気に登録する日は、最低でも想定人数より余裕を持った値にしてください。
+
+### SendGridで設定する場合
+
+1. SendGridでSender IdentityまたはDomain Authenticationを設定します。
+2. API Keyを作成します。
+3. Supabaseの `Authentication` → `Email` → `SMTP Settings` に以下を入力します。
+
+```text
+Sender email: no-reply@okinawa-pickleball.jp
+Sender name: 沖縄県ピックルボール協会
+SMTP host: smtp.sendgrid.net
+SMTP port: 587
+SMTP username: apikey
+SMTP password: SendGridのAPI Key
+```
+
+### Gmail SMTPで設定する場合
+
+Google Workspaceを使っている場合のみ検討してください。個人Gmailを本番Authメールに使う運用は避けてください。
+
+```text
+SMTP host: smtp.gmail.com
+SMTP port: 465 または 587
+SMTP username: 送信用Google Workspaceメールアドレス
+SMTP password: アプリパスワード
+```
+
+Google Workspaceでは、用途によって `smtp-relay.gmail.com` を使う方法もあります。大量登録や将来的な運用を考えると、ResendまたはSendGridの方が管理しやすいです。
+
+### Supabase確認メールテンプレート日本語化
+
+Supabase Dashboardで `Authentication` → `Email Templates` を開き、`Confirm signup` を編集します。
+
+Subject:
+
+```text
+【沖縄県ピックルボール協会】メールアドレス確認
+```
+
+Body:
+
+```html
+<h2>メールアドレスの確認</h2>
+<p>沖縄県ピックルボール協会 公式アプリへのご登録ありがとうございます。</p>
+<p>以下のボタンを押して、メールアドレスを確認してください。</p>
+<p>
+  <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 18px;background:#0f3a45;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">
+    メールアドレスを確認する
+  </a>
+</p>
+<p>ボタンが開けない場合は、以下のURLをブラウザにコピーしてください。</p>
+<p>{{ .ConfirmationURL }}</p>
+<p>このメールに心当たりがない場合は、破棄してください。</p>
+<p>沖縄県ピックルボール協会</p>
+```
+
+送信者名は、SMTP Settingsの `Sender name` に `沖縄県ピックルボール協会` と入力します。Management APIを使う場合は `smtp_sender_name` に同じ値を設定します。
+
+### 本番公開前のメール認証テスト
+
+1. SupabaseのSMTP Settingsを保存します。
+2. SupabaseのRate Limitsで、短時間に30名以上が登録しても止まらない値にします。
+3. ResendまたはSendGridの送信ログ画面を開いておきます。
+4. テスト用メールアドレスを3件以上用意します。
+5. Vercel本番URLから新規登録を実行します。
+6. それぞれのメールに確認メールが届くか確認します。
+7. メール本文のボタンを押して、アプリへ戻れるか確認します。
+8. Supabase AuthのUsersで、メール確認済みになるか確認します。
+9. 迷惑メールに入らないか確認します。
+10. 10件程度を連続登録して、`email rate limit exceeded` が出ないことを確認します。
+11. 大会前など登録が集中する日は、事前にResendまたはSendGrid側の送信上限も確認します。
+
 ## GitHub Private運用と公開前チェック
 
 このリポジトリは、会員情報・大会運営情報・Supabase管理用設定を扱うため、GitHubではPrivateリポジトリとして運用してください。Publicにする場合でも、実データや秘密キーを含めないことを必ず確認します。

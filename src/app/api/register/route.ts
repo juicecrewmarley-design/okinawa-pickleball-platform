@@ -79,6 +79,10 @@ function getErrorDetails(error: SupabaseErrorLike | null | undefined) {
 function getRegisterErrorMessage(error: SupabaseErrorLike) {
   const message = error.message ?? "";
 
+  if (error.status === 429 || /email rate limit|rate limit exceeded|too many requests/i.test(message)) {
+    return "確認メール送信が混み合っています。時間を空けて再度お試しください。";
+  }
+
   if (/database error saving new user/i.test(message)) {
     return "新規ユーザー保存時のデータベースエラーです。Supabase SQL Editorで最新の supabase/registration-repair.sql を実行してから、もう一度登録してください。";
   }
