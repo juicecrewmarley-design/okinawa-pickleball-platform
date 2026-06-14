@@ -26,8 +26,12 @@ type EntryApiResult = {
   code?: string;
   currentUrl?: string;
   details?: string;
+  hasServiceRoleKey?: boolean;
   message?: string;
   ok?: boolean;
+  receivedTournamentId?: string;
+  tournamentLookupData?: unknown;
+  tournamentLookupError?: unknown;
   tournamentId?: string;
 };
 
@@ -50,7 +54,7 @@ type LookupStatus = {
 };
 
 function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
 export default function TournamentDetailPage() {
@@ -58,6 +62,7 @@ export default function TournamentDetailPage() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [tournamentLoading, setTournamentLoading] = useState(true);
   const [tournamentError, setTournamentError] = useState("");
+  const [currentUrl, setCurrentUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
@@ -75,6 +80,10 @@ export default function TournamentDetailPage() {
     applicant: "",
     partner: ""
   });
+
+  useEffect(() => {
+    setCurrentUrl(window.location.href);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -124,6 +133,7 @@ export default function TournamentDetailPage() {
   const totalCapacity = sumCategoryCapacities(categoryCapacities) || tournament?.capacity || 0;
   const memberFeeYen = tournament?.memberFeeYen ?? categoryConfig.fees?.member ?? tournament?.feeYen ?? 0;
   const guestFeeYen = tournament?.guestFeeYen ?? categoryConfig.fees?.guest ?? tournament?.feeYen ?? 0;
+  const isSupabaseTournamentId = tournament ? isUuid(tournament.id) : false;
 
   const lookupMember = useCallback(async (memberId: string, purpose: MemberLookupPurpose) => {
     const trimmedMemberId = memberId.trim();
@@ -276,7 +286,7 @@ export default function TournamentDetailPage() {
       }
 
       if (isSupabaseConfigured && isUuid(tournament.id)) {
-        const response = await fetch(`/api/tournaments/${tournament.id}/entries`, {
+        const response = await fetch("/api/tournament-entries", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -298,7 +308,8 @@ export default function TournamentDetailPage() {
           partnerName: entryType === "doubles" ? partnerName : null,
           teamMembers: entryType === "team" ? teamMembers : [],
           linkingStatus,
-          status
+          status,
+          tournamentId: tournament.id
           })
         });
 
@@ -308,7 +319,11 @@ export default function TournamentDetailPage() {
           const details = result.details ? ` 詳細: ${result.details}` : "";
           const code = result.code ? ` (${result.code})` : "";
           const context = [
+            result.receivedTournamentId ? `受信した大会ID: ${result.receivedTournamentId}` : "",
             result.tournamentId ? `tournamentId: ${result.tournamentId}` : "",
+            typeof result.hasServiceRoleKey === "boolean" ? `SERVICE_ROLE_KEY: ${result.hasServiceRoleKey ? "設定あり" : "未設定"}` : "",
+            result.tournamentLookupData ? `大会確認データ: ${JSON.stringify(result.tournamentLookupData)}` : "",
+            result.tournamentLookupError ? `大会確認エラー: ${JSON.stringify(result.tournamentLookupError)}` : "",
             result.currentUrl ? `URL: ${result.currentUrl}` : ""
           ]
             .filter(Boolean)
@@ -411,6 +426,35 @@ export default function TournamentDetailPage() {
           </div>
         </section>
 
+        {!isSupabaseTournamentId ? (
+          <section className="rounded-lg border border-coral-200 bg-white p-5 shadow-soft sm:p-6">
+            <div className="flex items-start gap-3 rounded-md bg-coral-100 px-4 py-4 text-coral-700">
+              <AlertCircle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+              <div>
+                <h2 className="text-lg font-black">この大会URLからはエントリーできません</h2>
+                <p className="mt-2 text-sm font-bold leading-6">
+                  このページはSupabaseに保存できる大会IDではなく、古い仮IDまたはサンプル大会IDを開いています。大会一覧から、管理画面で作成した大会を開き直してください。
+                </p>
+                <dl className="mt-4 grid gap-2 break-all text-xs leading-5">
+                  <div>
+                    <dt className="font-black">現在の大会ID</dt>
+                    <dd>{tournament.id}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-black">現在のURL</dt>
+                    <dd>{currentUrl || `/tournaments/${params.id}`}</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+            <Link
+              href="/tournaments"
+              className="focus-ring mt-5 inline-flex w-full items-center justify-center rounded-md bg-ink px-5 py-3 text-sm font-black text-white transition hover:bg-ocean-700"
+            >
+              大会一覧から開き直す
+            </Link>
+          </section>
+        ) : (
         <form onSubmit={handleSubmit} className="rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
           <div className="mb-5 flex items-center gap-3">
             <span className="grid size-11 place-items-center rounded-full bg-ocean-50 text-ocean-700">
@@ -601,6 +645,7 @@ export default function TournamentDetailPage() {
             紐づけてエントリーする
           </button>
         </form>
+        )}
       </div>
     </PageShell>
   );
