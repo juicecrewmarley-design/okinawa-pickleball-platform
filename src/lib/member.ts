@@ -2,8 +2,7 @@ import { formatResidence } from "@/lib/okinawa";
 import type { MemberProfile, MembershipType } from "@/types/domain";
 
 export function generateMemberId() {
-  const random = Math.floor(1500 + Math.random() * 8500);
-  return `OKP-${random}`;
+  return "OKP-1500";
 }
 
 export function normalizeMemberId(value: string) {

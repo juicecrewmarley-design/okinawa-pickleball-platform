@@ -18,9 +18,84 @@ create sequence if not exists public.member_id_sequence start 1500;
 
 create or replace function public.next_member_id()
 returns text
-language sql
+language plpgsql
 as $$
-  select 'OKP-' || lpad(nextval('public.member_id_sequence')::text, 4, '0');
+declare
+  candidate text;
+begin
+  loop
+    candidate := 'OKP-' || lpad(nextval('public.member_id_sequence')::text, 4, '0');
+
+    exit when not exists (
+      select 1
+      from public.profiles
+      where member_id = candidate
+    )
+    and not exists (
+      select 1
+      from public.legacy_members
+      where member_id = candidate
+    );
+  end loop;
+
+  return candidate;
+end;
+$$;
+
+create or replace function public.peek_next_member_id()
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  max_member_number bigint;
+  sequence_last_value bigint;
+  sequence_is_called boolean;
+  candidate_number bigint;
+  candidate text;
+begin
+  select coalesce(max(member_number), 0)
+  into max_member_number
+  from (
+    select substring(member_id from '^OKP-([0-9]+)$')::bigint as member_number
+    from public.profiles
+    where member_id ~ '^OKP-[0-9]+$'
+    union all
+    select substring(member_id from '^OKP-([0-9]+)$')::bigint as member_number
+    from public.legacy_members
+    where member_id ~ '^OKP-[0-9]+$'
+  ) used_member_ids
+  where member_number is not null;
+
+  select last_value, is_called
+  into sequence_last_value, sequence_is_called
+  from public.member_id_sequence;
+
+  candidate_number := greatest(
+    1500,
+    max_member_number + 1,
+    case
+      when coalesce(sequence_is_called, true) then coalesce(sequence_last_value, 1499) + 1
+      else coalesce(sequence_last_value, 1500)
+    end
+  );
+
+  loop
+    candidate := 'OKP-' || lpad(candidate_number::text, 4, '0');
+
+    exit when not exists (
+      select 1 from public.profiles where member_id = candidate
+    )
+    and not exists (
+      select 1 from public.legacy_members where member_id = candidate
+    );
+
+    candidate_number := candidate_number + 1;
+  end loop;
+
+  return candidate;
+end;
 $$;
 
 create or replace function public.admin_email()
@@ -417,13 +492,21 @@ declare
   final_municipality text;
   final_membership_type public.membership_type;
   final_member_number bigint;
+  metadata_gender text;
+  metadata_area text;
+  metadata_residence_scope text;
 begin
-  requested_legacy_member_id := nullif(upper(regexp_replace(trim(auth_raw_user_meta_data ->> 'legacy_member_id'), '\s+', '', 'g')), '');
+  auth_raw_user_meta_data := coalesce(auth_raw_user_meta_data, '{}'::jsonb);
+  metadata_gender := nullif(auth_raw_user_meta_data ->> 'gender', '');
+  metadata_area := nullif(auth_raw_user_meta_data ->> 'area', '');
+  metadata_residence_scope := nullif(auth_raw_user_meta_data ->> 'residence_scope', '');
+
+  requested_legacy_member_id := nullif(upper(regexp_replace(trim(coalesce(auth_raw_user_meta_data ->> 'legacy_member_id', '')), '\s+', '', 'g')), '');
   if requested_legacy_member_id ~ '^(OKP-?)?[0-9]+$' then
     requested_legacy_member_id := 'OKP-' || lpad(substring(requested_legacy_member_id from '([0-9]+)$'), 4, '0');
   end if;
 
-  requested_legacy_birth_date := nullif(trim(auth_raw_user_meta_data ->> 'legacy_birth_date'), '');
+  requested_legacy_birth_date := nullif(trim(coalesce(auth_raw_user_meta_data ->> 'legacy_birth_date', '')), '');
   if requested_legacy_birth_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
     legacy_birth_date := requested_legacy_birth_date::date;
   end if;
@@ -468,11 +551,36 @@ begin
   final_member_id := coalesce(legacy_match.member_id, public.next_member_id());
   final_full_name := coalesce(legacy_match.full_name, nullif(auth_raw_user_meta_data ->> 'full_name', ''), split_part(auth_email, '@', 1), '会員');
   final_furigana := coalesce(legacy_match.furigana, nullif(auth_raw_user_meta_data ->> 'furigana', ''), '');
-  final_gender := coalesce(legacy_match.gender, coalesce(nullif(auth_raw_user_meta_data ->> 'gender', ''), 'no_answer')::public.gender_type);
-  final_birth_date := coalesce(legacy_match.birth_date, nullif(auth_raw_user_meta_data ->> 'birth_date', '')::date);
+  final_gender := coalesce(
+    legacy_match.gender,
+    case
+      when metadata_gender in ('male', 'female', 'other', 'no_answer') then metadata_gender::public.gender_type
+      else 'no_answer'::public.gender_type
+    end
+  );
+  final_birth_date := coalesce(
+    legacy_match.birth_date,
+    case
+      when nullif(auth_raw_user_meta_data ->> 'birth_date', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      then nullif(auth_raw_user_meta_data ->> 'birth_date', '')::date
+      else null
+    end
+  );
   final_phone := coalesce(legacy_match.phone, nullif(auth_raw_user_meta_data ->> 'phone', ''), '');
-  final_area := coalesce(legacy_match.area, coalesce(nullif(auth_raw_user_meta_data ->> 'area', ''), 'other')::public.member_area);
-  final_residence_scope := coalesce(legacy_match.residence_scope, coalesce(nullif(auth_raw_user_meta_data ->> 'residence_scope', ''), 'okinawa')::public.residence_scope);
+  final_area := coalesce(
+    legacy_match.area,
+    case
+      when metadata_area in ('south', 'naha', 'central', 'miyako', 'other') then metadata_area::public.member_area
+      else 'other'::public.member_area
+    end
+  );
+  final_residence_scope := coalesce(
+    legacy_match.residence_scope,
+    case
+      when metadata_residence_scope in ('okinawa', 'outside') then metadata_residence_scope::public.residence_scope
+      else 'okinawa'::public.residence_scope
+    end
+  );
   final_municipality := coalesce(legacy_match.municipality, nullif(auth_raw_user_meta_data ->> 'municipality', ''));
   final_member_number := nullif(substring(final_member_id from '^OKP-([0-9]+)$'), '')::bigint;
   final_membership_type := case

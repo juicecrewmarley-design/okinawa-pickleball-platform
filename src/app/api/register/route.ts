@@ -24,6 +24,14 @@ type LegacyMemberRow = {
   phone: string | null;
 };
 
+type CreatedProfileRow = {
+  member_id: string | null;
+};
+
+type SupabaseRegisterError = {
+  message?: string;
+};
+
 function buildLegacyMemberId(value?: string | null) {
   const normalized = (value ?? "").trim().toUpperCase().replace(/\s+/g, "");
   const number = normalized.match(/^(?:OKP-?)?(\d+)$/)?.[1];
@@ -49,6 +57,20 @@ function verifyLegacyMember(member: LegacyMemberRow, verification?: RegisterPayl
   return birthDateMatches || phoneMatches;
 }
 
+function getRegisterErrorMessage(error: SupabaseRegisterError) {
+  const message = error.message ?? "";
+
+  if (/database error saving new user/i.test(message)) {
+    return "新規ユーザー保存時のデータベースエラーです。profiles作成トリガーまたはOKP会員IDの自動採番で失敗している可能性があります。Supabase SQL Editorで supabase/registration-repair.sql を実行してから、もう一度登録してください。";
+  }
+
+  if (/already registered|already exists|already been registered/i.test(message)) {
+    return "このメールアドレスは既に登録されています。ログイン画面からログインしてください。";
+  }
+
+  return message || "新規ユーザーを保存できませんでした。";
+}
+
 export async function POST(request: Request) {
   const config = getSupabaseServerConfig();
 
@@ -64,7 +86,7 @@ export async function POST(request: Request) {
   }
 
   const payload = (await request.json()) as RegisterPayload;
-  const email = payload.email?.trim();
+  const email = payload.email?.trim().toLowerCase();
   const password = payload.password ?? "";
   const requestedLegacyMemberId = buildLegacyMemberId(payload.metadata?.legacy_member_id ?? payload.legacyVerification?.memberNumber);
   const requestedMembershipType = normalizeMembershipType(payload.metadata?.membership_type, requestedLegacyMemberId) as MembershipType;
@@ -89,8 +111,39 @@ export async function POST(request: Request) {
     legacy_phone_last4: normalizePhoneLast4(payload.legacyVerification?.phoneLast4) || null
   };
 
+  const adminSupabase = config.supabaseServiceRoleKey
+    ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: {
+          persistSession: false
+        }
+      })
+    : null;
+
+  if (adminSupabase) {
+    const { data: existingProfile, error: existingProfileError } = await adminSupabase
+      .from("profiles")
+      .select("id,email")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      console.error("Existing profile lookup failed during registration", existingProfileError);
+    }
+
+    if (existingProfile) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "email_already_registered",
+          message: "このメールアドレスは既に登録されています。ログイン画面からログインしてください。"
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   if (requestedLegacyMemberId) {
-    if (!config.supabaseServiceRoleKey) {
+    if (!adminSupabase) {
       return NextResponse.json(
         {
           ok: false,
@@ -111,12 +164,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-
-    const adminSupabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
-      auth: {
-        persistSession: false
-      }
-    });
 
     const { data: legacyMember, error: legacyError } = await adminSupabase
       .from("legacy_members")
@@ -165,7 +212,7 @@ export async function POST(request: Request) {
     }
   });
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -174,17 +221,40 @@ export async function POST(request: Request) {
   });
 
   if (error) {
+    console.error("Supabase sign up failed", {
+      message: error.message,
+      name: error.name,
+      status: error.status
+    });
+
     return NextResponse.json(
       {
         ok: false,
         code: "supabase_signup_failed",
-        message: error.message
+        message: getRegisterErrorMessage(error)
       },
       { status: 400 }
     );
   }
 
+  let createdMemberId: string | null = requestedLegacyMemberId || null;
+
+  if (adminSupabase && data.user?.id) {
+    const { data: createdProfile, error: createdProfileError } = await adminSupabase
+      .from("profiles")
+      .select("member_id")
+      .eq("id", data.user.id)
+      .maybeSingle();
+
+    if (createdProfileError) {
+      console.error("Created profile lookup failed during registration", createdProfileError);
+    }
+
+    createdMemberId = ((createdProfile as CreatedProfileRow | null)?.member_id ?? createdMemberId) || null;
+  }
+
   return NextResponse.json({
+    memberId: createdMemberId,
     ok: true
   });
 }

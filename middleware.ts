@@ -9,6 +9,7 @@ const publicPathPrefixes = [
   "/api/auth/logout",
   "/api/auth/me",
   "/api/register",
+  "/api/member-id/next",
   "/api/legacy-members/lookup",
   "/api/supabase-config"
 ];

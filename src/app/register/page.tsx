@@ -2,10 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, UserPlus } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
-import { formatLegacyMemberId, generateMemberId, getMembershipLabel, normalizeMemberNumber } from "@/lib/member";
+import { formatLegacyMemberId, getMembershipLabel, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
 import { getSupabaseConfigStatus, isSupabaseConfigured } from "@/lib/supabase";
 import type { Gender, MemberProfile, MembershipType, ResidenceScope } from "@/types/domain";
@@ -45,12 +45,26 @@ type LegacyLookupResult = {
   ok?: boolean;
 };
 
+type NextMemberIdResult = {
+  memberId?: string | null;
+  message?: string;
+  ok?: boolean;
+};
+
+type RegisterResult = {
+  memberId?: string | null;
+  message?: string;
+  ok?: boolean;
+};
+
 export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [createdMember, setCreatedMember] = useState<MemberProfile | null>(null);
   const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("select");
   const [memberId, setMemberId] = useState("");
+  const [memberIdLoading, setMemberIdLoading] = useState(false);
   const [legacyMemberNumber, setLegacyMemberNumber] = useState("");
   const [legacyBirthDate, setLegacyBirthDate] = useState("");
   const [legacyPhoneLast4, setLegacyPhoneLast4] = useState("");
@@ -68,7 +82,7 @@ export default function RegisterPage() {
   const [supabaseReady, setSupabaseReady] = useState(isSupabaseConfigured);
 
   useEffect(() => {
-    setMemberId(generateMemberId());
+    loadNextMemberId();
     getSupabaseConfigStatus().then((status) => setSupabaseReady(status.isConfigured));
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (requestedMode === "new" || requestedMode === "legacy") {
@@ -76,8 +90,24 @@ export default function RegisterPage() {
     }
   }, []);
 
+  async function loadNextMemberId() {
+    setMemberIdLoading(true);
+
+    try {
+      const response = await fetch("/api/member-id/next", { cache: "no-store" });
+      const result = (await response.json()) as NextMemberIdResult;
+      setMemberId(result.ok && result.memberId ? result.memberId : "登録時に正式発行");
+    } catch (error) {
+      console.error("Next member ID preview failed", error);
+      setMemberId("登録時に正式発行");
+    } finally {
+      setMemberIdLoading(false);
+    }
+  }
+
   function resetFormValues(mode: RegistrationMode) {
     setMessage("");
+    setMessageTone("success");
     setCreatedMember(null);
     setLegacyLookup({ text: "", tone: "idle" });
     setFullName("");
@@ -113,7 +143,7 @@ export default function RegisterPage() {
     setRegistrationMode(mode);
     resetFormValues(mode);
     if (mode === "new") {
-      setMemberId(generateMemberId());
+      loadNextMemberId();
       setMembershipType("general");
     }
     if (mode === "legacy") {
@@ -187,6 +217,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setLoading(true);
     setMessage("");
+    setMessageTone("success");
 
     const formData = new FormData(event.currentTarget);
     const password = String(formData.get("password"));
@@ -194,22 +225,25 @@ export default function RegisterPage() {
     const requestedLegacyMemberId = normalizedLegacyMemberNumber ? formatLegacyMemberId(normalizedLegacyMemberNumber) : "";
     const selectedMunicipality = residenceScope === "okinawa" ? municipality : "";
     const area = residenceScope === "okinawa" ? municipalityToArea(selectedMunicipality) : "other";
-    const issuedMemberId = requestedLegacyMemberId || memberId || generateMemberId();
+    const issuedMemberId = requestedLegacyMemberId || memberId || "登録時に正式発行";
     const finalMembershipType: MembershipType = registrationMode === "legacy" ? "premium" : membershipType;
 
     if (registrationMode === "legacy" && normalizedLegacyMemberNumber.length !== 4) {
+      setMessageTone("error");
       setMessage("番号引き継ぎの方は、L列のOKP番号4桁を入力して照合してください。");
       setLoading(false);
       return;
     }
 
     if (registrationMode === "legacy" && verifiedLegacyMemberId !== requestedLegacyMemberId) {
+      setMessageTone("error");
       setMessage("番号引き継ぎの方は、会員番号と本人確認情報を照合してから登録してください。");
       setLoading(false);
       return;
     }
 
     if (!fullName || !furigana || !email || !password) {
+      setMessageTone("error");
       setMessage("氏名、ふりがな、メールアドレス、パスワードを入力してください。");
       setLoading(false);
       return;
@@ -268,16 +302,23 @@ export default function RegisterPage() {
           metadata
         })
       });
-      const result = (await response.json()) as { ok?: boolean; message?: string };
+      const result = (await response.json()) as RegisterResult;
 
       if (!response.ok || !result.ok) {
         throw new Error(result.message ?? "Supabase登録APIでエラーが発生しました。");
       }
 
       setSupabaseReady(true);
+      const confirmedMemberId = result.memberId || requestedLegacyMemberId || memberId || "登録完了後に会員証で確認";
+      setMessageTone("success");
       setMessage("登録しました。確認メールが届く場合は、メール内のリンクを開いてください。");
-      setCreatedMember(profile);
+      setMemberId(confirmedMemberId);
+      setCreatedMember({
+        ...profile,
+        memberId: confirmedMemberId
+      });
     } catch (error) {
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "登録中にエラーが発生しました。");
     } finally {
       setLoading(false);
@@ -586,7 +627,11 @@ export default function RegisterPage() {
               {registrationMode === "legacy" ? "引き継ぐ会員ID" : "新規発行予定の会員ID"}
             </p>
             <p className="mt-1 text-2xl font-black text-ink">
-              {registrationMode === "legacy" && legacyMemberNumber ? formatLegacyMemberId(legacyMemberNumber) : memberId}
+              {registrationMode === "legacy" && legacyMemberNumber
+                ? formatLegacyMemberId(legacyMemberNumber)
+                : memberIdLoading
+                  ? "確認中..."
+                  : memberId}
             </p>
             {registrationMode === "legacy" ? (
               <p className="mt-2 text-xs leading-5 text-slate-500">
@@ -600,8 +645,16 @@ export default function RegisterPage() {
           </div>
 
           {message ? (
-            <p className="mt-4 flex items-center gap-2 rounded-md bg-palm-100 px-4 py-3 text-sm font-bold text-palm-700">
-              <CheckCircle2 className="size-5" aria-hidden="true" />
+            <p
+              className={`mt-4 flex items-center gap-2 rounded-md px-4 py-3 text-sm font-bold ${
+                messageTone === "success" ? "bg-palm-100 text-palm-700" : "bg-coral-100 text-coral-700"
+              }`}
+            >
+              {messageTone === "success" ? (
+                <CheckCircle2 className="size-5" aria-hidden="true" />
+              ) : (
+                <AlertCircle className="size-5" aria-hidden="true" />
+              )}
               {message}
             </p>
           ) : null}
