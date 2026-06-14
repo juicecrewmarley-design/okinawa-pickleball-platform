@@ -7,7 +7,7 @@ import { AlertCircle, CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users
 import { PageShell } from "@/components/PageShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatYen } from "@/lib/member";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { isSupabaseConfigured } from "@/lib/supabase";
 import { defaultTournamentCategoryConfig, getCategoryCapacity, sumCategoryCapacities } from "@/lib/tournament-categories";
 import type { Tournament } from "@/types/domain";
 
@@ -18,6 +18,13 @@ type TournamentApiResult = {
   message?: string;
   ok?: boolean;
   tournament?: Tournament | null;
+};
+
+type EntryApiResult = {
+  code?: string;
+  details?: string;
+  message?: string;
+  ok?: boolean;
 };
 
 type MemberLookupPurpose = "applicant" | "partner";
@@ -248,33 +255,40 @@ export default function TournamentDetailPage() {
     }
 
     try {
-      if (isSupabaseConfigured && supabase && isUuid(tournament.id)) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const userId = sessionData.session?.user.id;
-
-        const { error } = await supabase.from("tournament_entries").insert({
-          tournament_id: tournament.id,
-          user_id: userId ?? null,
+      if (isSupabaseConfigured && isUuid(tournament.id)) {
+        const response = await fetch(`/api/tournaments/${tournament.id}/entries`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
           category,
-          pair_or_team_name: entryType === "team" ? teamName : null,
-          team_name: entryType === "team" ? teamName : null,
-          applicant_type: selectedApplicantType,
-          applicant_member_id: selectedApplicantType === "member" ? applicantMemberId : null,
-          applicant_name: applicantName,
-          applicant_email: applicantEmail,
-          applicant_phone: applicantPhone,
-          entry_fee_yen: entryFeeYen,
-          entry_type: entryType,
+          pairOrTeamName: entryType === "team" ? teamName : null,
+          teamName: entryType === "team" ? teamName : null,
+          applicantType: selectedApplicantType,
+          applicantMemberId: selectedApplicantType === "member" ? applicantMemberId : null,
+          applicantName,
+          applicantEmail,
+          applicantPhone,
+          entryFeeYen,
+          entryType,
           division: entryType === "doubles" ? division : "チーム戦",
-          class_or_age_category: entryType === "doubles" ? doublesClass : teamAgeCategory,
-          partner_member_id: entryType === "doubles" ? partnerMemberId : null,
-          partner_name: entryType === "doubles" ? partnerName : null,
-          team_members: entryType === "team" ? teamMembers : [],
-          linking_status: linkingStatus,
+          classOrAgeCategory: entryType === "doubles" ? doublesClass : teamAgeCategory,
+          partnerMemberId: entryType === "doubles" ? partnerMemberId : null,
+          partnerName: entryType === "doubles" ? partnerName : null,
+          teamMembers: entryType === "team" ? teamMembers : [],
+          linkingStatus,
           status
+          })
         });
 
-        if (error) throw error;
+        const result = (await response.json()) as EntryApiResult;
+
+        if (!response.ok || !result.ok) {
+          const details = result.details ? ` 詳細: ${result.details}` : "";
+          const code = result.code ? ` (${result.code})` : "";
+          throw new Error(`${result.message ?? "エントリーを保存できませんでした。"}${code}${details}`);
+        }
       }
 
       setMessage(
