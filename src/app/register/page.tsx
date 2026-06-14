@@ -52,6 +52,8 @@ type NextMemberIdResult = {
 };
 
 type RegisterResult = {
+  code?: string;
+  details?: unknown;
   memberId?: string | null;
   message?: string;
   ok?: boolean;
@@ -305,7 +307,9 @@ export default function RegisterPage() {
       const result = (await response.json()) as RegisterResult;
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.message ?? "Supabase登録APIでエラーが発生しました。");
+        const detailsText = result.details ? `\n詳細: ${JSON.stringify(result.details)}` : "";
+        const codeText = result.code ? `\nコード: ${result.code}` : "";
+        throw new Error(`${result.message ?? "Supabase登録APIでエラーが発生しました。"}${codeText}${detailsText}`);
       }
 
       setSupabaseReady(true);
@@ -655,7 +659,7 @@ export default function RegisterPage() {
               ) : (
                 <AlertCircle className="size-5" aria-hidden="true" />
               )}
-              {message}
+              <span className="whitespace-pre-line">{message}</span>
             </p>
           ) : null}
 

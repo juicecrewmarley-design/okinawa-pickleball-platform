@@ -1,13 +1,50 @@
 create sequence if not exists public.member_id_sequence start 1500;
 
-alter table public.profiles
-add column if not exists residence_scope public.residence_scope not null default 'okinawa';
+create or replace function public.admin_email()
+returns text
+language sql
+stable
+as $$
+  select 'juicecrewmarley@yahoo.co.jp'::text;
+$$;
 
-alter table public.profiles
-add column if not exists municipality text;
+create or replace function public.initial_profile_role(profile_email text)
+returns public.member_role
+language sql
+stable
+as $$
+  select case
+    when lower(coalesce(profile_email, '')) = public.admin_email() then 'admin'::public.member_role
+    else 'member'::public.member_role
+  end;
+$$;
 
-alter table public.profiles
-add column if not exists membership_type public.membership_type not null default 'general';
+create table if not exists public.legacy_members (
+  member_id text primary key,
+  email text not null,
+  full_name text not null,
+  furigana text,
+  gender public.gender_type not null default 'no_answer',
+  birth_date date,
+  phone text,
+  area public.member_area not null default 'other',
+  residence_scope public.residence_scope not null default 'okinawa',
+  municipality text,
+  prefecture text,
+  region_text text,
+  pickleball_experience text,
+  form_timestamp timestamptz,
+  source text not null default 'google_form',
+  claimed_by uuid references auth.users(id) on delete set null,
+  claimed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.legacy_members add column if not exists residence_scope public.residence_scope not null default 'okinawa';
+alter table public.legacy_members add column if not exists municipality text;
+alter table public.legacy_members add column if not exists claimed_by uuid references auth.users(id) on delete set null;
+alter table public.legacy_members add column if not exists claimed_at timestamptz;
 
 create or replace function public.next_member_id()
 returns text
@@ -35,8 +72,84 @@ begin
 end;
 $$;
 
-alter table public.profiles
-alter column member_id set default public.next_member_id();
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  member_id text unique not null default public.next_member_id(),
+  full_name text not null,
+  furigana text not null,
+  gender public.gender_type not null default 'no_answer',
+  birth_date date,
+  phone text,
+  email text not null unique,
+  area public.member_area not null default 'other',
+  residence_scope public.residence_scope not null default 'okinawa',
+  municipality text,
+  role public.member_role not null default 'member',
+  membership_type public.membership_type not null default 'general',
+  avatar_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.profiles add column if not exists member_id text;
+alter table public.profiles add column if not exists full_name text;
+alter table public.profiles add column if not exists furigana text;
+alter table public.profiles add column if not exists gender public.gender_type not null default 'no_answer';
+alter table public.profiles add column if not exists birth_date date;
+alter table public.profiles add column if not exists phone text;
+alter table public.profiles add column if not exists email text;
+alter table public.profiles add column if not exists area public.member_area not null default 'other';
+alter table public.profiles add column if not exists residence_scope public.residence_scope not null default 'okinawa';
+alter table public.profiles add column if not exists municipality text;
+alter table public.profiles add column if not exists role public.member_role not null default 'member';
+alter table public.profiles add column if not exists membership_type public.membership_type not null default 'general';
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists created_at timestamptz not null default now();
+alter table public.profiles add column if not exists updated_at timestamptz not null default now();
+alter table public.profiles alter column member_id set default public.next_member_id();
+
+update public.profiles
+set member_id = public.next_member_id()
+where member_id is null or member_id = '';
+
+update public.profiles
+set email = coalesce(nullif(email, ''), id::text || '@missing.local')
+where email is null or email = '';
+
+update public.profiles
+set full_name = coalesce(nullif(full_name, ''), nullif(split_part(email, '@', 1), ''), 'Member')
+where full_name is null or full_name = '';
+
+update public.profiles
+set furigana = ''
+where furigana is null;
+
+alter table public.profiles alter column member_id set not null;
+alter table public.profiles alter column full_name set not null;
+alter table public.profiles alter column furigana set not null;
+alter table public.profiles alter column email set not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_member_id_key'
+      and conrelid = 'public.profiles'::regclass
+  ) then
+    alter table public.profiles add constraint profiles_member_id_key unique (member_id);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_email_key'
+      and conrelid = 'public.profiles'::regclass
+  ) then
+    alter table public.profiles add constraint profiles_email_key unique (email);
+  end if;
+end;
+$$ language plpgsql;
 
 create or replace function public.peek_next_member_id()
 returns text
@@ -143,7 +256,9 @@ declare
   requested_legacy_birth_date text;
   requested_legacy_phone_last4 text;
   legacy_birth_date date;
+  existing_profile public.profiles%rowtype;
   legacy_match public.legacy_members%rowtype;
+  final_email text;
   final_member_id text;
   final_full_name text;
   final_furigana text;
@@ -160,9 +275,17 @@ declare
   metadata_residence_scope text;
 begin
   auth_raw_user_meta_data := coalesce(auth_raw_user_meta_data, '{}'::jsonb);
+  final_email := lower(coalesce(nullif(auth_email, ''), auth_user_id::text || '@missing.local'));
   metadata_gender := nullif(auth_raw_user_meta_data ->> 'gender', '');
   metadata_area := nullif(auth_raw_user_meta_data ->> 'area', '');
   metadata_residence_scope := nullif(auth_raw_user_meta_data ->> 'residence_scope', '');
+
+  select *
+  into existing_profile
+  from public.profiles
+  where id = auth_user_id
+  limit 1
+  for update;
 
   requested_legacy_member_id := nullif(upper(regexp_replace(trim(coalesce(auth_raw_user_meta_data ->> 'legacy_member_id', '')), '\s+', '', 'g')), '');
   if requested_legacy_member_id ~ '^(OKP-?)?[0-9]+$' then
@@ -211,8 +334,8 @@ begin
     end if;
   end if;
 
-  final_member_id := coalesce(legacy_match.member_id, public.next_member_id());
-  final_full_name := coalesce(legacy_match.full_name, nullif(auth_raw_user_meta_data ->> 'full_name', ''), split_part(auth_email, '@', 1), 'Member');
+  final_member_id := coalesce(existing_profile.member_id, legacy_match.member_id, public.next_member_id());
+  final_full_name := coalesce(legacy_match.full_name, nullif(auth_raw_user_meta_data ->> 'full_name', ''), split_part(final_email, '@', 1), 'Member');
   final_furigana := coalesce(legacy_match.furigana, nullif(auth_raw_user_meta_data ->> 'furigana', ''), '');
   final_gender := coalesce(
     legacy_match.gender,
@@ -276,19 +399,23 @@ begin
     final_gender,
     final_birth_date,
     final_phone,
-    lower(auth_email),
+    final_email,
     final_area,
     final_residence_scope,
     final_municipality,
-    public.initial_profile_role(auth_email),
+    public.initial_profile_role(final_email),
     final_membership_type
   )
   on conflict (id) do update set
+    member_id = coalesce(public.profiles.member_id, excluded.member_id),
     email = excluded.email,
     full_name = coalesce(nullif(public.profiles.full_name, ''), excluded.full_name),
     furigana = coalesce(nullif(public.profiles.furigana, ''), excluded.furigana),
+    gender = coalesce(public.profiles.gender, excluded.gender),
     birth_date = coalesce(public.profiles.birth_date, excluded.birth_date),
     phone = coalesce(nullif(public.profiles.phone, ''), excluded.phone),
+    area = coalesce(public.profiles.area, excluded.area),
+    residence_scope = coalesce(public.profiles.residence_scope, excluded.residence_scope),
     municipality = coalesce(public.profiles.municipality, excluded.municipality),
     membership_type = case
       when public.profiles.member_id ~ '^OKP-[0-9]+$'
@@ -317,6 +444,10 @@ as $$
 begin
   perform public.upsert_profile_from_auth_user(new.id, new.email, new.raw_user_meta_data, true);
   return new;
+exception
+  when others then
+    raise warning 'handle_new_user profile upsert failed for auth user %: %', new.id, sqlerrm;
+    return new;
 end;
 $$;
 
@@ -325,6 +456,21 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
+
+select public.upsert_profile_from_auth_user(u.id, u.email, u.raw_user_meta_data, false)
+from auth.users u
+where not exists (
+  select 1
+  from public.profiles p
+  where p.id = u.id
+);
+
+select public.sync_member_id_sequence();
+
+update public.profiles
+set membership_type = 'premium'
+where member_id ~ '^OKP-[0-9]+$'
+  and substring(member_id from '^OKP-([0-9]+)$')::bigint between 1 and 209;
 
 select
   last_value as current_sequence_value,

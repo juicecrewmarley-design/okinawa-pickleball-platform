@@ -480,7 +480,9 @@ declare
   requested_legacy_birth_date text;
   requested_legacy_phone_last4 text;
   legacy_birth_date date;
+  existing_profile public.profiles%rowtype;
   legacy_match public.legacy_members%rowtype;
+  final_email text;
   final_member_id text;
   final_full_name text;
   final_furigana text;
@@ -497,9 +499,17 @@ declare
   metadata_residence_scope text;
 begin
   auth_raw_user_meta_data := coalesce(auth_raw_user_meta_data, '{}'::jsonb);
+  final_email := lower(coalesce(nullif(auth_email, ''), auth_user_id::text || '@missing.local'));
   metadata_gender := nullif(auth_raw_user_meta_data ->> 'gender', '');
   metadata_area := nullif(auth_raw_user_meta_data ->> 'area', '');
   metadata_residence_scope := nullif(auth_raw_user_meta_data ->> 'residence_scope', '');
+
+  select *
+  into existing_profile
+  from public.profiles
+  where id = auth_user_id
+  limit 1
+  for update;
 
   requested_legacy_member_id := nullif(upper(regexp_replace(trim(coalesce(auth_raw_user_meta_data ->> 'legacy_member_id', '')), '\s+', '', 'g')), '');
   if requested_legacy_member_id ~ '^(OKP-?)?[0-9]+$' then
@@ -548,8 +558,8 @@ begin
     end if;
   end if;
 
-  final_member_id := coalesce(legacy_match.member_id, public.next_member_id());
-  final_full_name := coalesce(legacy_match.full_name, nullif(auth_raw_user_meta_data ->> 'full_name', ''), split_part(auth_email, '@', 1), '会員');
+  final_member_id := coalesce(existing_profile.member_id, legacy_match.member_id, public.next_member_id());
+  final_full_name := coalesce(legacy_match.full_name, nullif(auth_raw_user_meta_data ->> 'full_name', ''), split_part(final_email, '@', 1), '会員');
   final_furigana := coalesce(legacy_match.furigana, nullif(auth_raw_user_meta_data ->> 'furigana', ''), '');
   final_gender := coalesce(
     legacy_match.gender,
@@ -613,14 +623,15 @@ begin
     final_gender,
     final_birth_date,
     final_phone,
-    auth_email,
+    final_email,
     final_area,
     final_residence_scope,
     final_municipality,
-    public.initial_profile_role(auth_email),
+    public.initial_profile_role(final_email),
     final_membership_type
   )
   on conflict (id) do update set
+    member_id = coalesce(public.profiles.member_id, excluded.member_id),
     email = excluded.email,
     full_name = coalesce(nullif(public.profiles.full_name, ''), excluded.full_name),
     furigana = coalesce(nullif(public.profiles.furigana, ''), excluded.furigana),
@@ -657,6 +668,10 @@ as $$
 begin
   perform public.upsert_profile_from_auth_user(new.id, new.email, new.raw_user_meta_data, true);
   return new;
+exception
+  when others then
+    raise warning 'handle_new_user profile upsert failed for auth user %: %', new.id, sqlerrm;
+    return new;
 end;
 $$;
 
