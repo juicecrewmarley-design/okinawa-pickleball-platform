@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, Building2, CalendarPlus, ClipboardList, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
-import { entries, mockMember, tournaments } from "@/lib/mock-data";
+import { getMembershipLabel } from "@/lib/member";
+import { tournaments } from "@/lib/mock-data";
 import { formatResidence } from "@/lib/okinawa";
 import {
   buildCategoryCapacities,
@@ -16,6 +17,7 @@ import {
   teamAgeCategories
 } from "@/lib/tournament-categories";
 import type { TournamentCategoryConfig } from "@/types/domain";
+import type { Gender, MemberArea, MembershipType, ResidenceScope } from "@/types/domain";
 
 const adminSections = [
   { id: "members", label: "会員", icon: Users },
@@ -56,6 +58,56 @@ type AdminApiResult = {
   ok?: boolean;
 };
 
+type AdminMember = {
+  area: MemberArea;
+  birthDate: string;
+  email: string;
+  fullName: string;
+  furigana: string;
+  gender: Gender;
+  id: string;
+  memberId: string;
+  membershipType: MembershipType;
+  municipality: string;
+  phone: string;
+  residenceScope: ResidenceScope;
+  role: string;
+};
+
+type AdminMembersResult = {
+  members?: AdminMember[];
+  message?: string;
+  ok?: boolean;
+};
+
+type AdminEntry = {
+  applicantEmail: string;
+  applicantMemberId: string;
+  applicantMembershipType: MembershipType;
+  applicantName: string;
+  applicantPhone: string;
+  applicantType: "member" | "guest";
+  category: string;
+  createdAt: string;
+  entryFeeYen: number;
+  entryType: "doubles" | "team";
+  id: string;
+  linkingStatus: "waiting" | "linked";
+  partnerMemberId: string;
+  partnerName: string;
+  status: "pending" | "confirmed" | "cancelled";
+  teamName: string;
+  tournamentId: string;
+  tournamentStartAt: string;
+  tournamentTitle: string;
+};
+
+type AdminEntriesResult = {
+  entries?: AdminEntry[];
+  message?: string;
+  ok?: boolean;
+};
+
 function formatAdminApiError(result: AdminApiResult) {
   const diagnostics = result.diagnostics;
   if (!diagnostics) return result.message ?? "保存できませんでした。";
@@ -75,11 +127,94 @@ function formatAdminApiError(result: AdminApiResult) {
   return `${result.message ?? "保存できませんでした。"}\n${details.join("\n")}`;
 }
 
+function getEntryStatusLabel(entry: AdminEntry) {
+  if (entry.status === "cancelled") return "キャンセル";
+  if (entry.status === "confirmed" || entry.linkingStatus === "linked") return "紐づけ完了";
+  return "待機中";
+}
+
+function getEntryStatusClass(entry: AdminEntry) {
+  if (entry.status === "cancelled") return "bg-slate-100 text-slate-600";
+  if (entry.status === "confirmed" || entry.linkingStatus === "linked") return "bg-palm-100 text-palm-700";
+  return "bg-coral-100 text-coral-700";
+}
+
 export default function AdminDashboard() {
+  const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
+  const [adminEntries, setAdminEntries] = useState<AdminEntry[]>([]);
+  const [adminMembersLoading, setAdminMembersLoading] = useState(true);
+  const [adminEntriesLoading, setAdminEntriesLoading] = useState(true);
+  const [adminMembersError, setAdminMembersError] = useState("");
+  const [adminEntriesError, setAdminEntriesError] = useState("");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingAction, setSavingAction] = useState<string | null>(null);
   const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadMembers() {
+      setAdminMembersLoading(true);
+      setAdminMembersError("");
+
+      try {
+        const response = await fetch("/api/admin/members", { cache: "no-store" });
+        const result = (await response.json()) as AdminMembersResult;
+
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message ?? "会員一覧を取得できませんでした。");
+        }
+
+        if (active) {
+          setAdminMembers(result.members ?? []);
+        }
+      } catch (error) {
+        if (active) {
+          setAdminMembers([]);
+          setAdminMembersError(error instanceof Error ? error.message : "会員一覧を取得できませんでした。");
+        }
+      } finally {
+        if (active) {
+          setAdminMembersLoading(false);
+        }
+      }
+    }
+
+    async function loadEntries() {
+      setAdminEntriesLoading(true);
+      setAdminEntriesError("");
+
+      try {
+        const response = await fetch("/api/admin/tournament-entries", { cache: "no-store" });
+        const result = (await response.json()) as AdminEntriesResult;
+
+        if (!response.ok || !result.ok) {
+          throw new Error(result.message ?? "大会参加者一覧を取得できませんでした。");
+        }
+
+        if (active) {
+          setAdminEntries(result.entries ?? []);
+        }
+      } catch (error) {
+        if (active) {
+          setAdminEntries([]);
+          setAdminEntriesError(error instanceof Error ? error.message : "大会参加者一覧を取得できませんでした。");
+        }
+      } finally {
+        if (active) {
+          setAdminEntriesLoading(false);
+        }
+      }
+    }
+
+    loadMembers();
+    loadEntries();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
@@ -297,20 +432,40 @@ export default function AdminDashboard() {
                 <tr>
                   <th className="px-4 py-3">会員ID</th>
                   <th className="px-4 py-3">氏名</th>
+                  <th className="px-4 py-3">会員種別</th>
                   <th className="px-4 py-3">居住地</th>
+                  <th className="px-4 py-3">電話</th>
                   <th className="px-4 py-3">メール</th>
-                  <th className="px-4 py-3">OPR</th>
                   <th className="px-4 py-3">権限</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ocean-50">
-                {[mockMember].map((member) => (
+                {adminMembersLoading ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={7}>
+                      会員一覧を読み込み中です。
+                    </td>
+                  </tr>
+                ) : adminMembersError ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={7}>
+                      {adminMembersError}
+                    </td>
+                  </tr>
+                ) : adminMembers.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={7}>
+                      登録済み会員はまだありません。
+                    </td>
+                  </tr>
+                ) : adminMembers.map((member) => (
                   <tr key={member.memberId}>
                     <td className="px-4 py-4 font-bold text-slate-600">{member.memberId}</td>
                     <td className="px-4 py-4 font-black text-ink">{member.fullName}</td>
+                    <td className="px-4 py-4">{getMembershipLabel(member.membershipType)}</td>
                     <td className="px-4 py-4">{formatResidence(member.residenceScope, member.municipality)}</td>
+                    <td className="px-4 py-4">{member.phone || "-"}</td>
                     <td className="px-4 py-4">{member.email}</td>
-                    <td className="px-4 py-4 font-black text-palm-700">{member.opr}</td>
                     <td className="px-4 py-4">{member.role}</td>
                   </tr>
                 ))}
@@ -366,23 +521,41 @@ export default function AdminDashboard() {
         <section id="entries" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
           <h2 className="text-2xl font-black">大会参加者一覧</h2>
           <div className="mt-5 grid gap-4">
-            {entries.map((entry) => {
-              const tournament = tournaments.find((item) => item.id === entry.tournamentId);
-              return (
-                <article key={entry.id} className="rounded-md bg-ocean-50 p-4">
-                  <p className="font-black text-ink">{entry.memberName}</p>
-                  <p className="mt-1 text-sm text-slate-600">{entry.memberId}</p>
-                  <p className="mt-2 text-sm">{tournament?.title} / {entry.category}{entry.teamName ? ` / ${entry.teamName}` : ""}</p>
-                  <p className="mt-1 text-sm font-bold text-slate-600">
-                    {entry.applicantMembershipType === "premium" ? "プレミアム会員" : entry.applicantType === "guest" ? "非会員" : "一般会員"}
-                    {entry.entryFeeYen ? ` / 参加費 ${entry.entryFeeYen.toLocaleString("ja-JP")}円` : ""}
-                  </p>
-                  <span className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-black text-ocean-700">
-                    {entry.status} / {entry.linkingStatus === "linked" ? "紐づけ完了" : "紐づけ待ち"}
+            {adminEntriesLoading ? (
+              <p className="rounded-md bg-ocean-50 p-4 text-sm font-bold text-slate-600">大会参加者一覧を読み込み中です。</p>
+            ) : adminEntriesError ? (
+              <p className="rounded-md bg-coral-100 p-4 text-sm font-bold leading-6 text-coral-700">{adminEntriesError}</p>
+            ) : adminEntries.length === 0 ? (
+              <p className="rounded-md bg-ocean-50 p-4 text-sm font-bold text-slate-600">大会参加者はまだ登録されていません。</p>
+            ) : adminEntries.map((entry) => (
+              <article key={entry.id} className="rounded-md bg-ocean-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-black text-ink">{entry.applicantName || "氏名未登録"}</p>
+                    <p className="mt-1 text-sm text-slate-600">{entry.applicantMemberId || "会員IDなし"}</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-black ${getEntryStatusClass(entry)}`}>
+                    {getEntryStatusLabel(entry)}
                   </span>
-                </article>
-              );
-            })}
+                </div>
+                <p className="mt-3 text-sm font-black text-ink">{entry.tournamentTitle}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {entry.category}
+                  {entry.teamName ? ` / ${entry.teamName}` : ""}
+                </p>
+                {entry.partnerName ? (
+                  <p className="mt-1 text-sm text-slate-600">
+                    ペア: {entry.partnerName}
+                    {entry.partnerMemberId ? `（${entry.partnerMemberId}）` : ""}
+                  </p>
+                ) : null}
+                <p className="mt-2 text-sm font-bold text-slate-600">
+                  {entry.applicantType === "guest" ? "非会員" : getMembershipLabel(entry.applicantMembershipType)}
+                  {entry.entryFeeYen ? ` / 参加費 ${entry.entryFeeYen.toLocaleString("ja-JP")}円` : ""}
+                  {entry.tournamentStartAt ? ` / 開催日 ${new Date(entry.tournamentStartAt).toLocaleDateString("ja-JP")}` : ""}
+                </p>
+              </article>
+            ))}
           </div>
         </section>
 

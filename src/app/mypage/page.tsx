@@ -87,6 +87,7 @@ export default function MyPage() {
   const [entries, setEntries] = useState<EntryStatus[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [entriesError, setEntriesError] = useState("");
+  const [editingProfile, setEditingProfile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveTone, setSaveTone] = useState<"success" | "error">("success");
@@ -197,6 +198,7 @@ export default function MyPage() {
       setFormValues(buildProfileFormState(nextMember));
       setSaveTone("success");
       setSaveMessage("会員情報を保存しました。");
+      setEditingProfile(false);
     } catch (error) {
       setSaveTone("error");
       setSaveMessage(error instanceof Error ? error.message : "会員情報の保存中にエラーが発生しました。");
@@ -218,7 +220,9 @@ export default function MyPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-black">会員情報</h2>
-                <p className="mt-1 text-sm font-bold text-slate-500">会員IDと会員種別は表示専用です。</p>
+                <p className="mt-1 text-sm font-bold text-slate-500">
+                  {editingProfile ? "会員IDと会員種別は表示専用です。" : "登録済みの会員情報を確認できます。"}
+                </p>
               </div>
               <span className="rounded-full bg-palm-100 px-3 py-1 text-xs font-black text-palm-700">
                 {getMembershipLabel(member.membershipType)}
@@ -227,9 +231,28 @@ export default function MyPage() {
 
             <div className="mt-4 grid gap-3 rounded-md bg-ocean-50 p-4 text-sm sm:grid-cols-2">
               <InfoItem label="会員ID" value={member.memberId} />
+              <InfoItem label="氏名" value={member.fullName} />
+              <InfoItem label="ふりがな" value={member.furigana} />
+              <InfoItem label="性別" value={genderOptions.find((option) => option.value === member.gender)?.label ?? "回答しない"} />
+              <InfoItem label="生年月日" value={member.birthDate || "未登録"} />
+              <InfoItem label="電話番号" value={member.phone || "未登録"} />
+              <InfoItem label="メールアドレス" value={member.email} />
               <InfoItem label="居住地" value={formatResidence(member.residenceScope, member.municipality)} />
             </div>
 
+            {!editingProfile ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setFormValues(buildProfileFormState(member));
+                  setSaveMessage("");
+                  setEditingProfile(true);
+                }}
+                className="focus-ring mt-5 inline-flex w-full items-center justify-center rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700"
+              >
+                会員情報を変更する
+              </button>
+            ) : (
             <form onSubmit={handleProfileSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
               <EditableInput label="氏名" value={formValues.fullName} onChange={(value) => updateFormValue("fullName", value)} required />
               <EditableInput label="ふりがな" value={formValues.furigana} onChange={(value) => updateFormValue("furigana", value)} required />
@@ -301,15 +324,29 @@ export default function MyPage() {
                 </p>
               ) : null}
 
-              <button
-                type="submit"
-                disabled={saving}
-                className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-2"
-              >
-                {saving ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <Save className="size-5" aria-hidden="true" />}
-                {saving ? "保存中..." : "会員情報を保存"}
-              </button>
+              <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormValues(buildProfileFormState(member));
+                    setSaveMessage("");
+                    setEditingProfile(false);
+                  }}
+                  className="focus-ring inline-flex items-center justify-center rounded-md bg-ocean-50 px-5 py-3 font-black text-ink transition hover:bg-ocean-100"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <Save className="size-5" aria-hidden="true" />}
+                  {saving ? "保存中..." : "会員情報を保存"}
+                </button>
+              </div>
             </form>
+            )}
           </section>
         </div>
 
