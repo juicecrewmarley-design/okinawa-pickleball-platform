@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { Bell, CalendarDays, Dumbbell, Megaphone } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
+import { getServerAuthProfile } from "@/lib/server-auth";
 import { getPublicNotices } from "@/lib/public-data";
 
 const noticeIcon = {
@@ -19,6 +21,12 @@ const noticeLabel = {
 export const dynamic = "force-dynamic";
 
 export default async function NoticesPage() {
+  const authProfile = await getServerAuthProfile();
+
+  if (!authProfile) {
+    redirect("/login");
+  }
+
   const notices = await getPublicNotices();
 
   return (

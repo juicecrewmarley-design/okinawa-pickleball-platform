@@ -1,15 +1,23 @@
 import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Building2, CalendarDays, IdCard, Trophy, Users } from "lucide-react";
 import { rankings } from "@/lib/mock-data";
 import { getPublicNotices, getPublicSponsors, getPublicTournaments } from "@/lib/public-data";
 import { StatCard } from "@/components/StatCard";
 import { TournamentCard } from "@/components/TournamentCard";
 import { RankingTable } from "@/components/RankingTable";
+import { getServerAuthProfile } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const authProfile = await getServerAuthProfile();
+
+  if (!authProfile) {
+    redirect("/login");
+  }
+
   const [tournaments, notices, sponsors] = await Promise.all([
     getPublicTournaments(),
     getPublicNotices(),

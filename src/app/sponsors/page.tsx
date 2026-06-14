@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowUpRight, Building2 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
+import { getServerAuthProfile } from "@/lib/server-auth";
 import { getPublicSponsors } from "@/lib/public-data";
 
 const rankLabel = {
@@ -14,6 +16,12 @@ const rankLabel = {
 export const dynamic = "force-dynamic";
 
 export default async function SponsorsPage() {
+  const authProfile = await getServerAuthProfile();
+
+  if (!authProfile) {
+    redirect("/login");
+  }
+
   const sponsors = await getPublicSponsors();
 
   return (

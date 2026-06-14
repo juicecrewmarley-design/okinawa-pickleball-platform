@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AutoLogout } from "@/components/AutoLogout";
+import { AuthGate } from "@/components/AuthGate";
 import { AppHeader } from "@/components/AppHeader";
 
 export const metadata: Metadata = {
@@ -16,9 +17,11 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
-        <AutoLogout />
-        <AppHeader />
-        {children}
+        <AuthGate>
+          <AutoLogout />
+          <AppHeader />
+          {children}
+        </AuthGate>
       </body>
     </html>
   );

@@ -1,12 +1,20 @@
+import { redirect } from "next/navigation";
 import { Filter, Search } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { TournamentCard } from "@/components/TournamentCard";
+import { getServerAuthProfile } from "@/lib/server-auth";
 import { getPublicTournamentsResult } from "@/lib/public-data";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function TournamentsPage() {
+  const authProfile = await getServerAuthProfile();
+
+  if (!authProfile) {
+    redirect("/login");
+  }
+
   const result = await getPublicTournamentsResult();
   const tournaments = result.data;
 
