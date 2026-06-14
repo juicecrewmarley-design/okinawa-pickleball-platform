@@ -28,6 +28,7 @@ type EntryApiResult = {
   details?: string;
   hasServiceRoleKey?: boolean;
   message?: string;
+  missingColumn?: string | null;
   ok?: boolean;
   receivedTournamentId?: string;
   tournamentLookupData?: unknown;
@@ -321,6 +322,7 @@ export default function TournamentDetailPage() {
           const context = [
             result.receivedTournamentId ? `受信した大会ID: ${result.receivedTournamentId}` : "",
             result.tournamentId ? `tournamentId: ${result.tournamentId}` : "",
+            result.missingColumn ? `不足カラム: ${result.missingColumn}` : "",
             typeof result.hasServiceRoleKey === "boolean" ? `SERVICE_ROLE_KEY: ${result.hasServiceRoleKey ? "設定あり" : "未設定"}` : "",
             result.tournamentLookupData ? `大会確認データ: ${JSON.stringify(result.tournamentLookupData)}` : "",
             result.tournamentLookupError ? `大会確認エラー: ${JSON.stringify(result.tournamentLookupError)}` : "",

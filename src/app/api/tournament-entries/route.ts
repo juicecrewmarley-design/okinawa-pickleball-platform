@@ -120,8 +120,12 @@ async function findMember(supabase: SupabaseClient, memberId?: string | null) {
 }
 
 function getSupabaseErrorMessage(error: SupabaseErrorLike) {
+  const missingColumn = getMissingColumnName(error);
+
   if (error.code === "PGRST204") {
-    return "エントリー保存に必要なカラムがSupabaseにありません。supabase/schema.sql をSQL Editorで再実行してください。";
+    return missingColumn
+      ? `エントリー保存に必要なカラム '${missingColumn}' がSupabaseにありません。supabase/tournament-entries-repair.sql をSQL Editorで実行してください。`
+      : "エントリー保存に必要なカラムがSupabaseにありません。supabase/tournament-entries-repair.sql をSQL Editorで実行してください。";
   }
 
   if (error.code === "23503") {
@@ -133,6 +137,11 @@ function getSupabaseErrorMessage(error: SupabaseErrorLike) {
   }
 
   return error.message ? `エントリーを保存できませんでした。${error.message}` : "エントリーを保存できませんでした。";
+}
+
+function getMissingColumnName(error: SupabaseErrorLike) {
+  const source = [error.message, error.details].filter(Boolean).join(" ");
+  return source.match(/'([^']+)' column/)?.[1] ?? source.match(/column "([^"]+)"/i)?.[1] ?? null;
 }
 
 function toLookupError(error: SupabaseErrorLike | null) {
@@ -375,6 +384,7 @@ export async function POST(request: Request) {
           }),
           code: error.code,
           details: error.details,
+          missingColumn: getMissingColumnName(error),
           ok: false,
           message: getSupabaseErrorMessage(error)
         },

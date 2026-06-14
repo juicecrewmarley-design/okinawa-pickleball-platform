@@ -323,6 +323,11 @@ alter table public.tournaments add column if not exists member_fee_yen integer n
 alter table public.tournaments add column if not exists guest_fee_yen integer not null default 0;
 alter table public.tournaments add column if not exists category_capacities jsonb not null default '{}'::jsonb;
 alter table public.tournaments add column if not exists category_config jsonb not null default '{}'::jsonb;
+alter table public.tournament_entries add column if not exists id uuid default gen_random_uuid();
+alter table public.tournament_entries add column if not exists tournament_id uuid references public.tournaments(id) on delete cascade;
+alter table public.tournament_entries add column if not exists user_id uuid references public.profiles(id) on delete set null;
+alter table public.tournament_entries add column if not exists category text not null default '';
+alter table public.tournament_entries add column if not exists pair_or_team_name text;
 alter table public.tournament_entries alter column user_id drop not null;
 alter table public.tournament_entries alter column pair_or_team_name drop not null;
 alter table public.tournament_entries add column if not exists team_name text;
@@ -339,6 +344,10 @@ alter table public.tournament_entries add column if not exists partner_member_id
 alter table public.tournament_entries add column if not exists partner_name text;
 alter table public.tournament_entries add column if not exists team_members jsonb not null default '[]'::jsonb;
 alter table public.tournament_entries add column if not exists linking_status public.entry_linking_status not null default 'waiting';
+alter table public.tournament_entries add column if not exists status public.entry_status not null default 'pending';
+alter table public.tournament_entries add column if not exists note text;
+alter table public.tournament_entries add column if not exists created_at timestamptz not null default now();
+alter table public.tournament_entries add column if not exists updated_at timestamptz not null default now();
 alter table public.opr_points add column if not exists division text;
 alter table public.opr_points add column if not exists class_or_age_category text;
 alter table public.opr_points add column if not exists overall_gender public.gender_type;
