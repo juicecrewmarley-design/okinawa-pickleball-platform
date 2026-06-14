@@ -222,13 +222,14 @@ export default function TournamentDetailPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!tournament) return;
 
     setLoading(true);
     setMessage("");
     setMessageTone("success");
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const selectedApplicantType = String(formData.get("applicantType")) === "guest" ? "guest" : "member";
     const applicantMemberId = String(formData.get("applicantMemberId") ?? "").trim();
     const applicantName = String(formData.get("applicantName") ?? "").trim();
@@ -340,7 +341,11 @@ export default function TournamentDetailPage() {
           : `エントリーを保存しました。${entryLabel} は申込受付済みです。会員IDの紐づけまたは管理者確認後に確定できます。参加費は${formatYen(entryFeeYen)}です。`
       );
       setMessageTone("success");
-      event.currentTarget.reset();
+      try {
+        form.reset();
+      } catch (resetError) {
+        console.error("Tournament entry form reset failed", resetError);
+      }
       resetEntryForm();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "エントリー中にエラーが発生しました。");
