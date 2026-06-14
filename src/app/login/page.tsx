@@ -97,17 +97,19 @@ export default function LoginPage() {
             {mode === "admin" ? "管理者ログイン" : "ログイン"}
           </button>
         </form>
-        <div className="mt-6 rounded-md bg-ocean-50 p-4">
-          <p className="text-center text-sm font-black text-ink">まだログイン情報がない方</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <Link href="/register?mode=new" className="focus-ring rounded-md bg-white px-4 py-3 text-center text-sm font-black text-ocean-700 shadow-sm hover:bg-ocean-100">
-              新規の方
-            </Link>
-            <Link href="/register?mode=legacy" className="focus-ring rounded-md bg-white px-4 py-3 text-center text-sm font-black text-coral-600 shadow-sm hover:bg-coral-100">
-              番号引き継ぐ方
-            </Link>
+        {mode === "member" ? (
+          <div className="mt-6 rounded-md bg-ocean-50 p-4">
+            <p className="text-center text-sm font-black text-ink">まだログイン情報がない方</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <Link href="/register?mode=new" className="focus-ring rounded-md bg-white px-4 py-3 text-center text-sm font-black text-ocean-700 shadow-sm hover:bg-ocean-100">
+                新規の方
+              </Link>
+              <Link href="/register?mode=legacy" className="focus-ring rounded-md bg-white px-4 py-3 text-center text-sm font-black text-coral-600 shadow-sm hover:bg-coral-100">
+                番号引き継ぐ方
+              </Link>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </PageShell>
   );

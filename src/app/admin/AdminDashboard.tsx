@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bell, Building2, CalendarDays, CalendarPlus, ClipboardList, Download, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
+import { Bell, Building2, CalendarDays, CalendarPlus, ClipboardList, Download, Loader2, Medal, Save, Shield, Trash2, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
 import { getMembershipLabel } from "@/lib/member";
@@ -41,6 +41,12 @@ type AdminApiResult = {
     };
     dbAdmin?: boolean | null;
     hasServiceRoleKey?: boolean;
+    deletedWith?: string | null;
+    deleteError?: {
+      code?: string;
+      details?: string;
+      message?: string;
+    } | null;
     insertedWith?: string | null;
     insertError?: {
       code?: string;
@@ -136,6 +142,7 @@ function formatAdminApiError(result: AdminApiResult) {
   if (!diagnostics) return result.message ?? "保存できませんでした。";
 
   const insertError = diagnostics.insertError;
+  const deleteError = diagnostics.deleteError;
   const serviceRoleError = diagnostics.serviceRoleError;
   const details = [
     `userId: ${diagnostics.auth?.userId ? "取得済み" : "未取得"}`,
@@ -143,7 +150,9 @@ function formatAdminApiError(result: AdminApiResult) {
     `role: ${diagnostics.auth?.role ?? "不明"}`,
     `dbAdmin: ${diagnostics.dbAdmin === null || diagnostics.dbAdmin === undefined ? "未確認" : diagnostics.dbAdmin ? "true" : "false"}`,
     `service role key: ${diagnostics.hasServiceRoleKey ? "設定済み" : "未設定"}`,
+    diagnostics.deletedWith ? `deletedWith: ${diagnostics.deletedWith}` : "",
     insertError ? `insert error: ${insertError.code ?? "codeなし"} ${insertError.message ?? ""} ${insertError.details ?? ""}` : "",
+    deleteError ? `delete error: ${deleteError.code ?? "codeなし"} ${deleteError.message ?? ""} ${deleteError.details ?? ""}` : "",
     serviceRoleError ? `service role error: ${serviceRoleError.code ?? "codeなし"} ${serviceRoleError.message ?? ""} ${serviceRoleError.details ?? ""}` : ""
   ].filter(Boolean);
 
@@ -223,9 +232,11 @@ export default function AdminDashboard() {
   const [adminTournamentsError, setAdminTournamentsError] = useState("");
   const [adminEntriesError, setAdminEntriesError] = useState("");
   const [selectedTournamentYear, setSelectedTournamentYear] = useState(String(new Date().getFullYear()));
+  const [selectedTournamentStatus, setSelectedTournamentStatus] = useState<"all" | "published" | "draft">("all");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingAction, setSavingAction] = useState<string | null>(null);
+  const [deletingTournamentId, setDeletingTournamentId] = useState<string | null>(null);
   const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
 
   const loadAdminTournaments = useCallback(async () => {
@@ -261,9 +272,15 @@ export default function AdminDashboard() {
   }, [adminTournaments]);
 
   const filteredAdminTournaments = useMemo(() => {
-    if (selectedTournamentYear === "all") return adminTournaments;
-    return adminTournaments.filter((tournament) => getYearFromDate(tournament.startAt) === selectedTournamentYear);
-  }, [adminTournaments, selectedTournamentYear]);
+    return adminTournaments.filter((tournament) => {
+      const matchesYear = selectedTournamentYear === "all" || getYearFromDate(tournament.startAt) === selectedTournamentYear;
+      const matchesStatus =
+        selectedTournamentStatus === "all" ||
+        (selectedTournamentStatus === "published" ? isTournamentPublished(tournament.status) : !isTournamentPublished(tournament.status));
+
+      return matchesYear && matchesStatus;
+    });
+  }, [adminTournaments, selectedTournamentStatus, selectedTournamentYear]);
 
   useEffect(() => {
     let active = true;
@@ -566,6 +583,40 @@ export default function AdminDashboard() {
     ]);
   }
 
+  async function handleTournamentDelete(tournament: AdminTournament) {
+    const confirmed = window.confirm("データすべて消えますが本当に削除しますか？");
+    if (!confirmed) return;
+
+    setDeletingTournamentId(tournament.id);
+    setSavedTournamentId(null);
+    setMessageTone("success");
+    setMessage("大会削除処理を開始しました。");
+
+    try {
+      const response = await fetch(`/api/admin/tournaments?id=${encodeURIComponent(tournament.id)}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json()) as AdminApiResult;
+
+      if (!response.ok || !result.ok) {
+        throw new Error(formatAdminApiError(result));
+      }
+
+      setMessageTone("success");
+      setMessage(result.message ?? "大会を削除しました。");
+      await loadAdminTournaments();
+    } catch (error) {
+      console.error("Admin tournament delete failed", {
+        error,
+        tournamentId: tournament.id
+      });
+      setMessageTone("error");
+      setMessage(error instanceof Error ? error.message : "大会削除中にエラーが発生しました。");
+    } finally {
+      setDeletingTournamentId(null);
+    }
+  }
+
   return (
     <PageShell
       eyebrow="Admin"
@@ -695,6 +746,18 @@ export default function AdminDashboard() {
                   ))}
                 </select>
               </label>
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                状態
+                <select
+                  value={selectedTournamentStatus}
+                  onChange={(event) => setSelectedTournamentStatus(event.target.value as "all" | "published" | "draft")}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-2"
+                >
+                  <option value="all">すべて</option>
+                  <option value="published">公開</option>
+                  <option value="draft">未公開</option>
+                </select>
+              </label>
               <ExportButton
                 disabled={adminTournamentsLoading || filteredAdminTournaments.length === 0}
                 label="大会一覧CSV"
@@ -704,7 +767,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[920px] text-left text-sm">
+            <table className="w-full min-w-[1080px] text-left text-sm">
               <thead className="bg-ocean-50 text-xs uppercase tracking-[0.16em] text-ocean-700">
                 <tr>
                   <th className="px-4 py-3">年度</th>
@@ -718,25 +781,26 @@ export default function AdminDashboard() {
                   <th className="px-4 py-3">プレミアム会員</th>
                   <th className="px-4 py-3">定員</th>
                   <th className="px-4 py-3">カテゴリ</th>
+                  <th className="px-4 py-3">削除</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ocean-50">
                 {adminTournamentsLoading ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={11}>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={12}>
                       大会一覧を読み込み中です。
                     </td>
                   </tr>
                 ) : adminTournamentsError ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={11}>
+                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={12}>
                       {adminTournamentsError}
                     </td>
                   </tr>
                 ) : filteredAdminTournaments.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={11}>
-                      選択した年度の大会はまだありません。
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={12}>
+                      選択した条件の大会はまだありません。
                     </td>
                   </tr>
                 ) : (
@@ -761,6 +825,21 @@ export default function AdminDashboard() {
                       <td className="px-4 py-4">{tournament.guestFeeYen.toLocaleString("ja-JP")}円</td>
                       <td className="px-4 py-4">{tournament.capacity}名</td>
                       <td className="px-4 py-4">{tournament.categories.join(" / ") || "-"}</td>
+                      <td className="px-4 py-4">
+                        <button
+                          type="button"
+                          onClick={() => handleTournamentDelete(tournament)}
+                          disabled={deletingTournamentId === tournament.id}
+                          className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-coral-100 px-3 py-2 text-xs font-black text-coral-700 transition hover:bg-coral-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingTournamentId === tournament.id ? (
+                            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2 className="size-4" aria-hidden="true" />
+                          )}
+                          削除する
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}

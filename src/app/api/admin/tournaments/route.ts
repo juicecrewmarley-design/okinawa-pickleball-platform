@@ -50,6 +50,8 @@ type SupabaseInsertError = {
 type TournamentSaveDiagnostics = {
   auth: ServerAuthDiagnostics;
   dbAdmin: boolean | null;
+  deletedWith?: "rls" | "service_role" | null;
+  deleteError?: SupabaseInsertError | null;
   hasServiceRoleKey: boolean;
   insertError: SupabaseInsertError | null;
   insertedWith: "rls" | "service_role" | null;
@@ -374,6 +376,152 @@ export async function POST(request: Request) {
       {
         ok: false,
         message: error instanceof Error ? `大会を保存できませんでした。${error.message}` : "大会保存中に予期しないエラーが発生しました。"
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const config = getSupabaseServerConfig();
+    const authResult = await getServerAuthContextWithDiagnostics();
+    const diagnostics: TournamentSaveDiagnostics = {
+      auth: authResult.diagnostics,
+      dbAdmin: null,
+      deletedWith: null,
+      deleteError: null,
+      hasServiceRoleKey: Boolean(config.supabaseServiceRoleKey),
+      insertError: null,
+      insertedWith: null,
+      serviceRoleError: null
+    };
+
+    if (!authResult.context || !authResult.diagnostics.userId) {
+      return errorResponse("ログイン情報を取得できませんでした。もう一度管理者ログインしてください。", 401, diagnostics);
+    }
+
+    if (!authResult.diagnostics.profileFound) {
+      return errorResponse("ログインユーザーのプロフィールが見つかりません。profilesテーブルを確認してください。", 401, diagnostics);
+    }
+
+    if (authResult.context.profile.role !== "admin") {
+      return errorResponse("管理者権限がありません。profiles.role が admin か確認してください。", 403, diagnostics);
+    }
+
+    const tournamentId = new URL(request.url).searchParams.get("id")?.trim();
+
+    if (!tournamentId) {
+      return errorResponse("削除する大会IDが指定されていません。", 400, diagnostics);
+    }
+
+    const { data: dbAdmin, error: adminCheckError } = await authResult.context.supabase.rpc("is_admin");
+    diagnostics.dbAdmin = dbAdmin === true;
+
+    if (adminCheckError || dbAdmin !== true) {
+      console.error("Admin tournament delete rejected by DB admin check", {
+        adminCheckError,
+        auth: diagnostics.auth,
+        dbAdmin,
+        profile: authResult.context.profile,
+        tournamentId
+      });
+
+      return errorResponse(
+        adminCheckError
+          ? adminTournamentErrorMessage(adminCheckError)
+          : "大会を削除できませんでした。Supabase側で管理者判定が通りませんでした。",
+        403,
+        diagnostics
+      );
+    }
+
+    if (config.supabaseServiceRoleKey) {
+      const serviceSupabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: {
+          persistSession: false
+        }
+      });
+
+      const { data, error } = await serviceSupabase
+        .from("tournaments")
+        .delete()
+        .eq("id", tournamentId)
+        .select(tournamentSelectColumns)
+        .maybeSingle();
+
+      if (error) {
+        diagnostics.deleteError = serializeSupabaseError(error);
+        console.error("Admin tournament service role delete failed", {
+          error,
+          auth: diagnostics.auth,
+          profile: authResult.context.profile,
+          table: "public.tournaments",
+          tournamentId
+        });
+
+        return errorResponse(`大会を削除できませんでした。Supabaseエラー: ${error.message ?? "詳細不明"}`, 400, diagnostics);
+      }
+
+      if (!data) {
+        return errorResponse("削除対象の大会が見つかりませんでした。", 404, diagnostics);
+      }
+
+      diagnostics.deletedWith = "service_role";
+      revalidateTournamentPages(tournamentId);
+
+      return NextResponse.json({
+        diagnostics,
+        id: tournamentId,
+        message: "大会を削除しました。",
+        ok: true
+      });
+    }
+
+    const { data, error } = await authResult.context.supabase
+      .from("tournaments")
+      .delete()
+      .eq("id", tournamentId)
+      .select(tournamentSelectColumns)
+      .maybeSingle();
+
+    if (error) {
+      diagnostics.deleteError = serializeSupabaseError(error);
+      console.error("Admin tournament RLS delete failed", {
+        error,
+        auth: diagnostics.auth,
+        profile: authResult.context.profile,
+        table: "public.tournaments",
+        tournamentId
+      });
+
+      return errorResponse(
+        `大会を削除できませんでした。Supabaseエラー: ${error.message ?? "詳細不明"} Vercelに SUPABASE_SERVICE_ROLE_KEY を設定すると、管理者確認後にサーバー側から削除できます。`,
+        400,
+        diagnostics
+      );
+    }
+
+    if (!data) {
+      return errorResponse("削除対象の大会が見つかりませんでした。", 404, diagnostics);
+    }
+
+    diagnostics.deletedWith = "rls";
+    revalidateTournamentPages(tournamentId);
+
+    return NextResponse.json({
+      diagnostics,
+      id: tournamentId,
+      message: "大会を削除しました。",
+      ok: true
+    });
+  } catch (error) {
+    console.error("Admin tournament delete route crashed", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        message: error instanceof Error ? `大会を削除できませんでした。${error.message}` : "大会削除中に予期しないエラーが発生しました。"
       },
       { status: 500 }
     );
