@@ -149,3 +149,37 @@ supabase/grant-admin.sql
 ```text
 supabase/admin-tournament-saving.sql
 ```
+
+## GitHub Private運用と公開前チェック
+
+このリポジトリは、会員情報・大会運営情報・Supabase管理用設定を扱うため、GitHubではPrivateリポジトリとして運用してください。Publicにする場合でも、実データや秘密キーを含めないことを必ず確認します。
+
+公開・共有前に確認すること:
+
+1. GitHubのリポジトリ設定で `Settings` → `General` → `Danger Zone` → `Change repository visibility` から `Private` にします。
+2. `.env.local`、`.env`、`.env.*` はコミットしません。SupabaseのキーはVercel Environment Variablesまたはローカル `.env.local` のみに保存します。
+3. `SUPABASE_SERVICE_ROLE_KEY`、`sb_secret_`、JWT形式の秘密キーは、コード・README・SQL・履歴に入れません。
+4. `supabase/legacy-members-import.sql`、CSV、Excelなど、会員個人情報を含むファイルはコミットしません。
+5. ZIP成果物は古いコードや設定が残りやすいため、基本的にGitHubへコミットしません。
+6. コミット前に以下を確認します。
+
+```powershell
+git status --short
+git ls-files | Select-String -Pattern "legacy-members-import|\.csv$|\.xlsx$|\.xls$|\.env$|\.env\.local$"
+git grep -n "sb_secret_"
+git grep -n "SUPABASE_SERVICE_ROLE_KEY="
+```
+
+秘密キーや個人情報を過去にcommitしていた場合:
+
+1. そのキーは漏えい済みとして扱い、Supabaseで即時ローテーションします。
+2. GitHubをPrivateに変更しても、履歴に残った秘密情報は消えません。
+3. 履歴から削除する場合は `git filter-repo` またはBFG Repo-Cleanerで対象ファイル・文字列を削除します。
+4. 履歴を書き換えた後は `git push --force-with-lease` が必要です。共同作業者がいる場合は全員に再cloneを依頼します。
+5. GitHubに表示されたキャッシュやforkがある場合は、GitHub Supportへの削除依頼も検討します。
+
+現在の運用方針:
+
+- `.env.local.example` にはプレースホルダーだけを置きます。
+- 本番値はVercel Environment Variablesにだけ設定します。
+- 会員データの取り込みSQLはローカルで生成し、Supabase SQL Editorで実行後、Gitには入れません。

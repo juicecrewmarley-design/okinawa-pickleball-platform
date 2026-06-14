@@ -6,6 +6,10 @@ node_modules/
 out/
 
 # local env
+.env
+.env.*
+!.env.example
+!.env.local.example
 .env.local
 .env*.local
 
@@ -16,9 +20,14 @@ out/
 # verification artifacts
 artifacts/
 .zip-build-*/
+*.zip
 
 # sensitive imports
 supabase/legacy-members-import*.sql
+supabase/*members*import*.sql
+*.csv
+*.xls
+*.xlsx
 
 # OS/editor
 .DS_Store
