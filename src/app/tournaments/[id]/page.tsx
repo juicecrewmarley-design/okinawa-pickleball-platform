@@ -15,16 +15,20 @@ type EntryType = "doubles" | "team";
 type ApplicantType = "member" | "guest";
 
 type TournamentApiResult = {
+  currentUrl?: string;
   message?: string;
   ok?: boolean;
   tournament?: Tournament | null;
+  tournamentId?: string;
 };
 
 type EntryApiResult = {
   code?: string;
+  currentUrl?: string;
   details?: string;
   message?: string;
   ok?: boolean;
+  tournamentId?: string;
 };
 
 type MemberLookupPurpose = "applicant" | "partner";
@@ -84,7 +88,13 @@ export default function TournamentDetailPage() {
         const result = (await response.json()) as TournamentApiResult;
 
         if (!response.ok || !result.ok) {
-          throw new Error(result.message ?? "大会情報を取得できませんでした。");
+          const context = [
+            result.tournamentId ? `tournamentId: ${result.tournamentId}` : "",
+            result.currentUrl ? `URL: ${result.currentUrl}` : ""
+          ]
+            .filter(Boolean)
+            .join(" / ");
+          throw new Error(`${result.message ?? "大会情報を取得できませんでした。"}${context ? ` (${context})` : ""}`);
         }
 
         if (active) {
@@ -255,6 +265,16 @@ export default function TournamentDetailPage() {
     }
 
     try {
+      if (!isSupabaseConfigured) {
+        throw new Error("Supabase環境変数が未設定のため、エントリーを保存できません。Vercelの環境変数を確認してください。");
+      }
+
+      if (!isUuid(tournament.id)) {
+        throw new Error(
+          `Supabaseに保存できる大会IDではありません。大会一覧から管理画面で作成した大会を開き直してください。 tournamentId: ${tournament.id} / URL: ${window.location.href}`
+        );
+      }
+
       if (isSupabaseConfigured && isUuid(tournament.id)) {
         const response = await fetch(`/api/tournaments/${tournament.id}/entries`, {
           method: "POST",
@@ -287,14 +307,20 @@ export default function TournamentDetailPage() {
         if (!response.ok || !result.ok) {
           const details = result.details ? ` 詳細: ${result.details}` : "";
           const code = result.code ? ` (${result.code})` : "";
-          throw new Error(`${result.message ?? "エントリーを保存できませんでした。"}${code}${details}`);
+          const context = [
+            result.tournamentId ? `tournamentId: ${result.tournamentId}` : "",
+            result.currentUrl ? `URL: ${result.currentUrl}` : ""
+          ]
+            .filter(Boolean)
+            .join(" / ");
+          throw new Error(`${result.message ?? "エントリーを保存できませんでした。"}${code}${details}${context ? ` (${context})` : ""}`);
         }
       }
 
       setMessage(
         isLinked
-          ? `${entryLabel} は紐づけ完了のため、エントリー確定になりました。参加費は${formatYen(entryFeeYen)}です。`
-          : `${entryLabel} は申込受付済みです。会員IDの紐づけまたは管理者確認後に確定できます。参加費は${formatYen(entryFeeYen)}です。`
+          ? `エントリーを保存しました。${entryLabel} は紐づけ完了のため、エントリー確定になりました。参加費は${formatYen(entryFeeYen)}です。`
+          : `エントリーを保存しました。${entryLabel} は申込受付済みです。会員IDの紐づけまたは管理者確認後に確定できます。参加費は${formatYen(entryFeeYen)}です。`
       );
       setMessageTone("success");
       event.currentTarget.reset();

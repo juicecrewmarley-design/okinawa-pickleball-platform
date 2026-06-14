@@ -121,13 +121,16 @@ function getSupabaseErrorMessage(error: SupabaseErrorLike) {
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const config = getSupabaseServerConfig();
+  const currentUrl = request.headers.get("referer") ?? request.url;
 
   if (!config.isConfigured || !config.supabaseServiceRoleKey) {
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
         message:
-          "エントリー保存にはSupabaseのサーバー用設定が必要です。Vercelに SUPABASE_SERVICE_ROLE_KEY を設定してください。"
+          "エントリー保存にはSupabaseのサーバー用設定が必要です。Vercelに SUPABASE_SERVICE_ROLE_KEY を設定してください。",
+        tournamentId: id
       },
       { status: 500 }
     );
@@ -136,8 +139,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!isUuid(id)) {
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
-        message: "Supabaseに保存できる大会IDではありません。管理画面で作成した大会からエントリーしてください。"
+        message: "Supabaseに保存できる大会IDではありません。管理画面で作成した大会からエントリーしてください。",
+        tournamentId: id
       },
       { status: 400 }
     );
@@ -163,8 +168,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.error("Tournament entry tournament lookup failed", tournamentError);
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
-        message: `大会情報を確認できませんでした。${tournamentError.message ?? ""}`.trim()
+        message: `大会情報を確認できませんでした。${tournamentError.message ?? ""}`.trim(),
+        tournamentId: id
       },
       { status: 500 }
     );
@@ -173,8 +180,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!tournament) {
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
-        message: "指定された大会が見つかりませんでした。"
+        message: "指定された大会はSupabaseの public.tournaments に見つかりませんでした。大会一覧から開き直してください。",
+        tournamentId: id
       },
       { status: 404 }
     );
@@ -183,8 +192,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (tournament.status !== "open") {
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
-        message: "この大会は現在エントリー受付中ではありません。"
+        message: "この大会は現在エントリー受付中ではありません。",
+        tournamentId: id
       },
       { status: 400 }
     );
@@ -304,9 +315,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(
       {
         code: error.code,
+        currentUrl,
         details: error.details,
         ok: false,
-        message: getSupabaseErrorMessage(error)
+        message: getSupabaseErrorMessage(error),
+        tournamentId: id
       },
       { status: 500 }
     );
@@ -325,8 +338,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     return NextResponse.json(
       {
+        currentUrl,
         ok: false,
-        message
+        message,
+        tournamentId: id
       },
       { status }
     );

@@ -4,8 +4,27 @@ import { getPublicTournamentResult } from "@/lib/public-data";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+
+  if (!isUuid(id)) {
+    return NextResponse.json(
+      {
+        currentUrl: request.url,
+        isConfigured: true,
+        ok: false,
+        message: "この大会URLはSupabaseの大会IDではありません。大会一覧から管理画面で作成した大会を開き直してください。",
+        tournament: null,
+        tournamentId: id
+      },
+      { status: 400 }
+    );
+  }
+
   const result = await getPublicTournamentResult(id);
 
   if (result.error) {
@@ -25,9 +44,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(
       {
         isConfigured: result.isConfigured,
+        currentUrl: request.url,
         ok: false,
-        message: "指定された大会は見つかりませんでした。",
-        tournament: null
+        message: "指定された大会はSupabaseの public.tournaments に見つかりませんでした。大会一覧から開き直してください。",
+        tournament: null,
+        tournamentId: id
       },
       { status: 404 }
     );

@@ -113,6 +113,10 @@ function publicTournamentErrorMessage(error: { code?: string; details?: string; 
 const tournamentColumns =
   "id,title,description,venue,start_at,entry_deadline,fee_yen,member_fee_yen,guest_fee_yen,capacity,category_capacities,categories,category_config,status";
 
+function isSupabaseUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function getPublicTournaments() {
   const result = await getPublicTournamentsResult();
   return result.data;
@@ -144,7 +148,7 @@ export async function getPublicTournamentsResult(): Promise<PublicDataResult<Tou
   }
 
   return {
-    data: (data as TournamentRow[]).map(mapTournament),
+    data: (data as TournamentRow[]).filter((row) => isSupabaseUuid(row.id)).map(mapTournament),
     error: null,
     isConfigured: true
   };
@@ -162,6 +166,15 @@ export async function getPublicTournamentResult(id: string): Promise<PublicDataR
       data: null,
       error: "Supabase環境変数が未設定のため、大会詳細を取得できません。NEXT_PUBLIC_SUPABASE_URL と NEXT_PUBLIC_SUPABASE_ANON_KEY を確認してください。",
       isConfigured: false
+    };
+  }
+
+  if (!isSupabaseUuid(id)) {
+    return {
+      data: null,
+      details: `requested id: ${id}`,
+      error: "この大会URLはSupabaseの大会IDではありません。大会一覧から管理画面で作成した大会を開き直してください。",
+      isConfigured: true
     };
   }
 
