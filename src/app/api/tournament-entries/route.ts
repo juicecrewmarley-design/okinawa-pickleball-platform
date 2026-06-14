@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { normalizeMembershipType } from "@/lib/member";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
-import type { MembershipType } from "@/types/domain";
+import type { MembershipType, PaymentMethod } from "@/types/domain";
 
 type ApplicantType = "member" | "guest";
 type EntryType = "doubles" | "team";
@@ -19,6 +19,7 @@ type EntryPayload = {
   division?: string;
   entryFeeYen?: number;
   entryType?: EntryType;
+  paymentMethod?: PaymentMethod | null;
   partnerMemberId?: string | null;
   partnerName?: string | null;
   teamMembers?: { memberId?: string | null; name?: string | null }[];
@@ -50,6 +51,10 @@ function compact(value?: string | null) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizePaymentMethod(value?: PaymentMethod | null): PaymentMethod {
+  return value === "paypay" ? "paypay" : "cash";
 }
 
 function buildDiagnostics({
@@ -151,9 +156,12 @@ function getSupabaseErrorMessage(error: SupabaseErrorLike) {
   const missingColumn = getMissingColumnName(error);
 
   if (error.code === "PGRST204") {
+    const repairSql =
+      missingColumn === "payment_method" ? "supabase/payment-method-update.sql" : "supabase/membership-entry-update.sql";
+
     return missingColumn
-      ? `エントリー保存に必要なカラム '${missingColumn}' がSupabaseにありません。supabase/membership-entry-update.sql をSQL Editorで実行してください。`
-      : "エントリー保存に必要なカラムがSupabaseにありません。supabase/membership-entry-update.sql をSQL Editorで実行してください。";
+      ? `エントリー保存に必要なカラム '${missingColumn}' がSupabaseにありません。${repairSql} をSQL Editorで実行してください。`
+      : `エントリー保存に必要なカラムがSupabaseにありません。${repairSql} をSQL Editorで実行してください。`;
   }
 
   if (error.code === "23503") {
@@ -433,6 +441,7 @@ export async function POST(request: Request) {
       entry_type: entryType,
       linking_status: isLinked ? "linked" : "waiting",
       pair_or_team_name: entryType === "team" ? compact(payload.teamName) || null : null,
+      payment_method: normalizePaymentMethod(payload.paymentMethod),
       partner_member_id: entryType === "doubles" && partnerMember ? partnerMember.member_id : compact(payload.partnerMemberId) || null,
       partner_name: entryType === "doubles" ? partnerName : null,
       status: isLinked ? "confirmed" : "pending",

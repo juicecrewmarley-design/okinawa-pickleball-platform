@@ -16,8 +16,7 @@ import {
   sumCategoryCapacities,
   teamAgeCategories
 } from "@/lib/tournament-categories";
-import type { TournamentCategoryConfig } from "@/types/domain";
-import type { Gender, MemberArea, MembershipType, ResidenceScope } from "@/types/domain";
+import type { Gender, MemberArea, MembershipType, PaymentMethod, ResidenceScope, TournamentCategoryConfig } from "@/types/domain";
 
 const adminSections = [
   { id: "members", label: "会員", icon: Users },
@@ -95,6 +94,7 @@ type AdminEntry = {
   linkingStatus: "waiting" | "linked";
   partnerMemberId: string;
   partnerName: string;
+  paymentMethod: PaymentMethod;
   status: "pending" | "confirmed" | "cancelled";
   teamName: string;
   tournamentId: string;
@@ -137,6 +137,10 @@ function getEntryStatusClass(entry: AdminEntry) {
   if (entry.status === "cancelled") return "bg-slate-100 text-slate-600";
   if (entry.status === "confirmed" || entry.linkingStatus === "linked") return "bg-palm-100 text-palm-700";
   return "bg-coral-100 text-coral-700";
+}
+
+function getPaymentMethodLabel(method: PaymentMethod) {
+  return method === "paypay" ? "PayPay" : "現金";
 }
 
 export default function AdminDashboard() {
@@ -552,6 +556,7 @@ export default function AdminDashboard() {
                 <p className="mt-2 text-sm font-bold text-slate-600">
                   {entry.applicantType === "guest" ? "非会員" : getMembershipLabel(entry.applicantMembershipType)}
                   {entry.entryFeeYen ? ` / 参加費 ${entry.entryFeeYen.toLocaleString("ja-JP")}円` : ""}
+                  {` / 支払い方法 ${getPaymentMethodLabel(entry.paymentMethod)}`}
                   {entry.tournamentStartAt ? ` / 開催日 ${new Date(entry.tournamentStartAt).toLocaleDateString("ja-JP")}` : ""}
                 </p>
               </article>

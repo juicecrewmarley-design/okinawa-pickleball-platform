@@ -137,6 +137,7 @@ create table if not exists public.tournament_entries (
   applicant_email text,
   applicant_phone text,
   entry_fee_yen integer not null default 0,
+  payment_method text not null default 'cash',
   entry_type public.tournament_entry_type not null default 'doubles',
   division text,
   class_or_age_category text,
@@ -342,6 +343,7 @@ alter table public.tournament_entries add column if not exists applicant_name te
 alter table public.tournament_entries add column if not exists applicant_email text;
 alter table public.tournament_entries add column if not exists applicant_phone text;
 alter table public.tournament_entries add column if not exists entry_fee_yen integer not null default 0;
+alter table public.tournament_entries add column if not exists payment_method text not null default 'cash';
 alter table public.tournament_entries add column if not exists entry_type public.tournament_entry_type not null default 'doubles';
 alter table public.tournament_entries add column if not exists division text;
 alter table public.tournament_entries add column if not exists class_or_age_category text;
@@ -353,6 +355,9 @@ alter table public.tournament_entries add column if not exists status public.ent
 alter table public.tournament_entries add column if not exists note text;
 alter table public.tournament_entries add column if not exists created_at timestamptz not null default now();
 alter table public.tournament_entries add column if not exists updated_at timestamptz not null default now();
+update public.tournament_entries set payment_method = 'cash' where payment_method is null or payment_method not in ('cash', 'paypay');
+alter table public.tournament_entries drop constraint if exists tournament_entries_payment_method_check;
+alter table public.tournament_entries add constraint tournament_entries_payment_method_check check (payment_method in ('cash', 'paypay'));
 alter table public.opr_points add column if not exists division text;
 alter table public.opr_points add column if not exists class_or_age_category text;
 alter table public.opr_points add column if not exists overall_gender public.gender_type;

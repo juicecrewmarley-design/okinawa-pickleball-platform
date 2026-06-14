@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { formatYen, getMembershipLabel } from "@/lib/member";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { defaultTournamentCategoryConfig, getCategoryCapacity, sumCategoryCapacities } from "@/lib/tournament-categories";
-import type { MemberProfile, MembershipType, Tournament } from "@/types/domain";
+import type { MemberProfile, MembershipType, PaymentMethod, Tournament } from "@/types/domain";
 
 type EntryType = "doubles" | "team";
 
@@ -76,12 +76,18 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
-function formatEntryResultMessage(result: EntryApiResult, entryFeeYen: number) {
+function getPaymentMethodLabel(method: PaymentMethod) {
+  return method === "paypay" ? "PayPay" : "現金";
+}
+
+function formatEntryResultMessage(result: EntryApiResult, entryFeeYen: number, paymentMethod: PaymentMethod) {
+  const paymentLabel = getPaymentMethodLabel(paymentMethod);
+
   if (result.status === "confirmed" || result.linkingStatus === "linked") {
-    return `エントリーを保存しました。ペアの申込が揃ったため、エントリー完了です。参加料は${formatYen(entryFeeYen)}です。`;
+    return `エントリーを保存しました。ペアの申込が揃ったため、エントリー完了です。参加料は${formatYen(entryFeeYen)}、支払い方法は${paymentLabel}です。`;
   }
 
-  return `エントリーを保存しました。ペアの申込がまだ揃っていないため、現在は待機中です。ペア側も同じ大会・カテゴリであなたの会員IDを入力すると完了になります。参加料は${formatYen(entryFeeYen)}です。`;
+  return `エントリーを保存しました。ペアの申込がまだ揃っていないため、現在は待機中です。ペア側も同じ大会・カテゴリであなたの会員IDを入力すると完了になります。参加料は${formatYen(entryFeeYen)}、支払い方法は${paymentLabel}です。`;
 }
 
 export default function TournamentDetailPage() {
@@ -96,6 +102,7 @@ export default function TournamentDetailPage() {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [entryType, setEntryType] = useState<EntryType>("doubles");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [partnerMemberId, setPartnerMemberId] = useState("");
   const [partnerName, setPartnerName] = useState("");
   const [partnerLookup, setPartnerLookup] = useState<LookupStatus>({ text: "", tone: "idle" });
@@ -255,6 +262,7 @@ export default function TournamentDetailPage() {
     const teamAgeCategory = String(formData.get("teamAgeCategory") ?? "");
     const submittedPartnerMemberId = partnerMemberId.trim();
     const submittedPartnerName = partnerName.trim();
+    const submittedPaymentMethod = paymentMethod;
     const teamMembers = [2, 3, 4].map((index) => ({
       memberId: String(formData.get(`teamMember${index}Id`) ?? "").trim(),
       name: String(formData.get(`teamMember${index}Name`) ?? "").trim()
@@ -307,6 +315,7 @@ export default function TournamentDetailPage() {
           entryFeeYen,
           entryType,
           pairOrTeamName: entryType === "team" ? teamName : null,
+          paymentMethod: submittedPaymentMethod,
           partnerMemberId: entryType === "doubles" ? submittedPartnerMemberId : null,
           partnerName: entryType === "doubles" ? submittedPartnerName : null,
           teamMembers: entryType === "team" ? teamMembers : [],
@@ -334,7 +343,7 @@ export default function TournamentDetailPage() {
         throw new Error(`${result.message ?? "エントリーを保存できませんでした。"}${code}${details}${context ? ` (${context})` : ""}`);
       }
 
-      setMessage(`${formatEntryResultMessage(result, entryFeeYen)} 対象: ${entryLabel}`);
+      setMessage(`${formatEntryResultMessage(result, entryFeeYen, submittedPaymentMethod)} 対象: ${entryLabel}`);
       setMessageTone("success");
       setPartnerMemberId("");
       setPartnerName("");
@@ -570,6 +579,24 @@ export default function TournamentDetailPage() {
                 ))}
               </div>
             )}
+
+            <div className="mt-4 rounded-md bg-ocean-50 p-4">
+              <p className="text-sm font-black text-ink">支払い方法</p>
+              <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-white p-1">
+                {(["cash", "paypay"] as PaymentMethod[]).map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => setPaymentMethod(method)}
+                    className={`focus-ring rounded-md px-3 py-3 text-sm font-black ${
+                      paymentMethod === method ? "bg-ink text-white shadow" : "text-slate-600 hover:bg-ocean-50"
+                    }`}
+                  >
+                    {getPaymentMethodLabel(method)}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {message ? (
               <p

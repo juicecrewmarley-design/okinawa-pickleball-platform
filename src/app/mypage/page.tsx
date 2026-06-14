@@ -9,7 +9,7 @@ import { StatCard } from "@/components/StatCard";
 import { getMembershipLabel } from "@/lib/member";
 import { mockMember } from "@/lib/mock-data";
 import { formatResidence, municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
-import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
+import type { Gender, MemberProfile, PaymentMethod, ResidenceScope } from "@/types/domain";
 
 type MeResult = {
   message?: string;
@@ -25,6 +25,7 @@ type EntryStatus = {
   linkingStatus: "waiting" | "linked";
   partnerMemberId: string | null;
   partnerName: string | null;
+  paymentMethod: PaymentMethod;
   status: "pending" | "confirmed" | "cancelled";
   teamName: string | null;
   tournamentId: string;
@@ -79,6 +80,10 @@ function getEntryStatusClass(entry: EntryStatus) {
   if (entry.status === "cancelled") return "bg-slate-100 text-slate-600";
   if (entry.status === "confirmed" || entry.linkingStatus === "linked") return "bg-palm-100 text-palm-700";
   return "bg-coral-100 text-coral-700";
+}
+
+function getPaymentMethodLabel(method: PaymentMethod) {
+  return method === "paypay" ? "PayPay" : "現金";
 }
 
 export default function MyPage() {
@@ -398,6 +403,9 @@ export default function MyPage() {
                         開催日: {new Date(entry.tournamentStartAt).toLocaleDateString("ja-JP")}
                       </p>
                     ) : null}
+                    <p className="mt-2 text-xs font-bold text-slate-500">
+                      支払い方法: {getPaymentMethodLabel(entry.paymentMethod)}
+                    </p>
                   </article>
                 ))}
               </div>

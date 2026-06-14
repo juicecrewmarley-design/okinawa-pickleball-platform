@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getServerAuthContextWithDiagnostics } from "@/lib/server-auth";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
 import { normalizeMembershipType } from "@/lib/member";
-import type { MembershipType } from "@/types/domain";
+import type { MembershipType, PaymentMethod } from "@/types/domain";
 
 type EntryRow = {
   applicant_email: string | null;
@@ -20,6 +20,7 @@ type EntryRow = {
   linking_status: "waiting" | "linked";
   partner_member_id: string | null;
   partner_name: string | null;
+  payment_method?: PaymentMethod | null;
   status: "pending" | "confirmed" | "cancelled";
   team_members: { memberId?: string; name?: string }[] | null;
   team_name: string | null;
@@ -37,7 +38,7 @@ type EntryRow = {
 };
 
 const entryColumns =
-  "id,tournament_id,category,applicant_type,applicant_member_id,applicant_membership_type,applicant_name,applicant_email,applicant_phone,entry_fee_yen,entry_type,partner_member_id,partner_name,team_name,team_members,linking_status,status,created_at,tournaments(title,start_at)";
+  "id,tournament_id,category,applicant_type,applicant_member_id,applicant_membership_type,applicant_name,applicant_email,applicant_phone,entry_fee_yen,payment_method,entry_type,partner_member_id,partner_name,team_name,team_members,linking_status,status,created_at,tournaments(title,start_at)";
 const fallbackEntryColumns =
   "id,tournament_id,category,applicant_type,applicant_member_id,applicant_name,applicant_email,applicant_phone,entry_fee_yen,entry_type,partner_member_id,partner_name,team_name,team_members,linking_status,status,created_at,tournaments(title,start_at)";
 
@@ -83,8 +84,9 @@ export async function GET() {
     .order("created_at", { ascending: false });
   let data = primaryResult.data as unknown as EntryRow[] | null;
   let error = primaryResult.error;
+  const primaryErrorText = error ? [error.message, error.details].filter(Boolean).join(" ") : "";
 
-  if (error && [error.message, error.details].filter(Boolean).join(" ").includes("applicant_membership_type")) {
+  if (error && ["applicant_membership_type", "payment_method"].some((column) => primaryErrorText.includes(column))) {
     const fallback = await supabase
       .from("tournament_entries")
       .select(fallbackEntryColumns)
@@ -124,6 +126,7 @@ export async function GET() {
         linkingStatus: entry.linking_status,
         partnerMemberId: entry.partner_member_id ?? "",
         partnerName: entry.partner_name ?? "",
+        paymentMethod: entry.payment_method ?? "cash",
         status: entry.status,
         teamMembers: entry.team_members ?? [],
         teamName: entry.team_name ?? "",

@@ -8,6 +8,8 @@ export type MemberRole = "member" | "admin" | "sponsor";
 
 export type MembershipType = "general" | "premium";
 
+export type PaymentMethod = "cash" | "paypay";
+
 export type TournamentStatus = "draft" | "open" | "closed" | "finished";
 
 export type RankingCategory = "mens" | "womens" | "mixed" | "overall";
@@ -77,6 +79,7 @@ export type TournamentEntry = {
   applicantEmail?: string;
   applicantPhone?: string;
   entryFeeYen?: number;
+  paymentMethod?: PaymentMethod;
   entryType?: "doubles" | "team";
   partnerMemberId?: string;
   partnerName?: string;

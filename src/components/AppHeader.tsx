@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, CalendarDays, Home, IdCard, Shield, Trophy } from "lucide-react";
+import { Bell, CalendarDays, Home, IdCard, LogOut, Shield, Trophy } from "lucide-react";
 import { clsx } from "clsx";
 
 const navItems = [
@@ -11,7 +11,8 @@ const navItems = [
   { href: "/tournaments", label: "大会", icon: CalendarDays },
   { href: "/rankings", label: "OPR", icon: Trophy },
   { href: "/notices", label: "お知らせ", icon: Bell },
-  { href: "/admin", label: "管理", icon: Shield }
+  { href: "/admin", label: "管理", icon: Shield },
+  { href: "/logout", label: "ログアウト", icon: LogOut }
 ];
 
 export function AppHeader() {
