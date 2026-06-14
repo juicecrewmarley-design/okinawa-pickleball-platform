@@ -132,8 +132,8 @@ export default function AdminDashboard() {
       !venue ? "会場" : "",
       !startAt ? "開催日時" : "",
       !entryDeadline ? "申込締切" : "",
-      !memberFeeYenText ? "会員参加費" : "",
-      !guestFeeYenText ? "非会員参加費" : "",
+      !memberFeeYenText ? "一般会員参加料" : "",
+      !guestFeeYenText ? "プレミアム会員参加料" : "",
       !defaultCapacityText ? "未入力時の定員" : "",
       !description ? "説明" : ""
     ].filter(Boolean);
@@ -327,8 +327,8 @@ export default function AdminDashboard() {
               <AdminInput name="venue" label="会場" placeholder="沖縄県総合運動公園" required />
               <AdminInput name="startAt" label="開催日時" type="datetime-local" required />
               <AdminInput name="entryDeadline" label="申込締切" type="datetime-local" required />
-              <AdminInput name="memberFeeYen" label="会員参加費" type="number" placeholder="3000" required />
-              <AdminInput name="guestFeeYen" label="非会員参加費" type="number" placeholder="4000" required />
+              <AdminInput name="memberFeeYen" label="一般会員参加料" type="number" placeholder="3000" required />
+              <AdminInput name="guestFeeYen" label="プレミアム会員参加料" type="number" placeholder="2000" required />
               <AdminInput name="defaultCapacity" label="未入力時の定員" type="number" placeholder="16" required />
               <fieldset className="rounded-md border border-ocean-100 p-4 sm:col-span-2">
                 <legend className="px-2 text-sm font-black text-ink">ダブルス種目</legend>
@@ -374,7 +374,7 @@ export default function AdminDashboard() {
                   <p className="mt-1 text-sm text-slate-600">{entry.memberId}</p>
                   <p className="mt-2 text-sm">{tournament?.title} / {entry.category}{entry.teamName ? ` / ${entry.teamName}` : ""}</p>
                   <p className="mt-1 text-sm font-bold text-slate-600">
-                    {entry.applicantType === "guest" ? "非会員" : "会員"}
+                    {entry.applicantMembershipType === "premium" ? "プレミアム会員" : entry.applicantType === "guest" ? "非会員" : "一般会員"}
                     {entry.entryFeeYen ? ` / 参加費 ${entry.entryFeeYen.toLocaleString("ja-JP")}円` : ""}
                   </p>
                   <span className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-black text-ocean-700">

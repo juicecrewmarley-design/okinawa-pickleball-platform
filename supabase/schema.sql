@@ -1,6 +1,7 @@
 create extension if not exists "pgcrypto";
 
 create type public.member_role as enum ('member', 'admin', 'sponsor');
+create type public.membership_type as enum ('general', 'premium');
 create type public.member_area as enum ('south', 'naha', 'central', 'miyako', 'other');
 create type public.residence_scope as enum ('okinawa', 'outside');
 create type public.gender_type as enum ('male', 'female', 'other', 'no_answer');
@@ -13,7 +14,7 @@ create type public.notice_type as enum ('event', 'tournament', 'practice', 'asso
 create type public.sponsor_rank as enum ('platinum', 'gold', 'silver', 'bronze', 'supporter');
 create type public.opr_category as enum ('mens', 'womens', 'mixed', 'overall');
 
-create sequence if not exists public.member_id_sequence start 1;
+create sequence if not exists public.member_id_sequence start 1500;
 
 create or replace function public.next_member_id()
 returns text
@@ -94,6 +95,7 @@ create table if not exists public.profiles (
   residence_scope public.residence_scope not null default 'okinawa',
   municipality text,
   role public.member_role not null default 'member',
+  membership_type public.membership_type not null default 'general',
   avatar_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -130,6 +132,7 @@ create table if not exists public.tournament_entries (
   team_name text,
   applicant_type public.entry_applicant_type not null default 'member',
   applicant_member_id text,
+  applicant_membership_type public.membership_type not null default 'general',
   applicant_name text not null default '',
   applicant_email text,
   applicant_phone text,
@@ -287,6 +290,7 @@ alter table public.profiles add column if not exists phone text;
 alter table public.profiles add column if not exists email text;
 alter table public.profiles add column if not exists area public.member_area not null default 'other';
 alter table public.profiles add column if not exists role public.member_role not null default 'member';
+alter table public.profiles add column if not exists membership_type public.membership_type not null default 'general';
 alter table public.profiles alter column member_id set default public.next_member_id();
 update public.profiles set member_id = public.next_member_id() where member_id is null;
 update public.profiles set email = coalesce(email, id::text || '@missing.local') where email is null or email = '';
@@ -333,6 +337,7 @@ alter table public.tournament_entries alter column pair_or_team_name drop not nu
 alter table public.tournament_entries add column if not exists team_name text;
 alter table public.tournament_entries add column if not exists applicant_type public.entry_applicant_type not null default 'member';
 alter table public.tournament_entries add column if not exists applicant_member_id text;
+alter table public.tournament_entries add column if not exists applicant_membership_type public.membership_type not null default 'general';
 alter table public.tournament_entries add column if not exists applicant_name text not null default '';
 alter table public.tournament_entries add column if not exists applicant_email text;
 alter table public.tournament_entries add column if not exists applicant_phone text;
@@ -374,7 +379,7 @@ begin
   ) used_member_ids
   where member_number is not null;
 
-  perform setval('public.member_id_sequence', greatest(max_member_number, 1), true);
+  perform setval('public.member_id_sequence', greatest(max_member_number, 1499), true);
   return max_member_number;
 end;
 $$;
@@ -405,6 +410,8 @@ declare
   final_area public.member_area;
   final_residence_scope public.residence_scope;
   final_municipality text;
+  final_membership_type public.membership_type;
+  final_member_number bigint;
 begin
   requested_legacy_member_id := nullif(upper(regexp_replace(trim(auth_raw_user_meta_data ->> 'legacy_member_id'), '\s+', '', 'g')), '');
   if requested_legacy_member_id ~ '^(OKP-?)?[0-9]+$' then
@@ -462,6 +469,13 @@ begin
   final_area := coalesce(legacy_match.area, coalesce(nullif(auth_raw_user_meta_data ->> 'area', ''), 'other')::public.member_area);
   final_residence_scope := coalesce(legacy_match.residence_scope, coalesce(nullif(auth_raw_user_meta_data ->> 'residence_scope', ''), 'okinawa')::public.residence_scope);
   final_municipality := coalesce(legacy_match.municipality, nullif(auth_raw_user_meta_data ->> 'municipality', ''));
+  final_member_number := nullif(substring(final_member_id from '^OKP-([0-9]+)$'), '')::bigint;
+  final_membership_type := case
+    when final_member_number between 1 and 209 then 'premium'::public.membership_type
+    when legacy_match.member_id is not null then 'premium'::public.membership_type
+    when auth_raw_user_meta_data ->> 'membership_type' = 'premium' then 'premium'::public.membership_type
+    else 'general'::public.membership_type
+  end;
 
   insert into public.profiles (
     id,
@@ -475,7 +489,8 @@ begin
     area,
     residence_scope,
     municipality,
-    role
+    role,
+    membership_type
   )
   values (
     auth_user_id,
@@ -489,7 +504,8 @@ begin
     final_area,
     final_residence_scope,
     final_municipality,
-    public.initial_profile_role(auth_email)
+    public.initial_profile_role(auth_email),
+    final_membership_type
   )
   on conflict (id) do update set
     email = excluded.email,
@@ -501,6 +517,12 @@ begin
     area = coalesce(public.profiles.area, excluded.area),
     residence_scope = coalesce(public.profiles.residence_scope, excluded.residence_scope),
     municipality = coalesce(public.profiles.municipality, excluded.municipality),
+    membership_type = case
+      when public.profiles.member_id ~ '^OKP-[0-9]+$'
+        and substring(public.profiles.member_id from '^OKP-([0-9]+)$')::bigint between 1 and 209
+      then 'premium'::public.membership_type
+      else coalesce(public.profiles.membership_type, excluded.membership_type)
+    end,
     updated_at = now();
 
   if legacy_match.member_id is not null then
@@ -540,6 +562,11 @@ where not exists (
 );
 
 select public.sync_member_id_sequence();
+
+update public.profiles
+set membership_type = 'premium'
+where member_id ~ '^OKP-[0-9]+$'
+  and substring(member_id from '^OKP-([0-9]+)$')::bigint between 1 and 209;
 
 update public.profiles
 set role = 'member'

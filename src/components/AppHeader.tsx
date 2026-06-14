@@ -18,6 +18,7 @@ const navItems = [
 
 export function AppHeader() {
   const pathname = usePathname();
+  const isAuthPage = pathname.startsWith("/login") || pathname.startsWith("/register");
 
   return (
     <header className="sticky top-0 z-40 border-b border-ocean-100/80 bg-white/92 backdrop-blur">
@@ -31,6 +32,7 @@ export function AppHeader() {
             <span className="block text-lg font-black leading-tight text-ink">公式アプリ</span>
           </span>
         </Link>
+        {!isAuthPage ? (
         <nav className="flex gap-2 overflow-x-auto pb-1 lg:pb-0" aria-label="主要メニュー">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -54,6 +56,7 @@ export function AppHeader() {
             );
           })}
         </nav>
+        ) : null}
       </div>
     </header>
   );

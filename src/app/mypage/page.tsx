@@ -6,18 +6,44 @@ import { CalendarCheck, Trophy, UserRound } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
 import { StatCard } from "@/components/StatCard";
+import { getMembershipLabel } from "@/lib/member";
 import { entries, mockMember, tournaments } from "@/lib/mock-data";
 import { formatResidence } from "@/lib/okinawa";
 import type { MemberProfile } from "@/types/domain";
+
+type MeResult = {
+  ok?: boolean;
+  profile?: Partial<MemberProfile>;
+};
 
 export default function MyPage() {
   const [member, setMember] = useState<MemberProfile>(mockMember);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("opba-demo-member");
-    if (stored) {
-      setMember({ ...mockMember, ...(JSON.parse(stored) as Partial<MemberProfile>) });
+    let active = true;
+
+    async function loadProfile() {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const result = (await response.json()) as MeResult;
+
+        if (active && response.ok && result.ok && result.profile) {
+          setMember({ ...mockMember, ...result.profile });
+          return;
+        }
+      } catch {
+        const stored = window.localStorage.getItem("opba-demo-member");
+        if (active && stored) {
+          setMember({ ...mockMember, ...(JSON.parse(stored) as Partial<MemberProfile>) });
+        }
+      }
     }
+
+    loadProfile();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const memberEntries = entries.filter((entry) => entry.memberId === member.memberId || entry.memberId === mockMember.memberId);
@@ -45,6 +71,10 @@ export default function MyPage() {
               <div>
                 <dt className="font-bold text-slate-500">メール</dt>
                 <dd className="mt-1 font-black text-ink">{member.email}</dd>
+              </div>
+              <div>
+                <dt className="font-bold text-slate-500">会員種別</dt>
+                <dd className="mt-1 font-black text-ink">{getMembershipLabel(member.membershipType)}</dd>
               </div>
               <div>
                 <dt className="font-bold text-slate-500">居住地</dt>

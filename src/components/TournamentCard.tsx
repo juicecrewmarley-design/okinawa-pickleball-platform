@@ -6,8 +6,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { getCategoryCapacity, sumCategoryCapacities } from "@/lib/tournament-categories";
 
 export function TournamentCard({ tournament }: { tournament: Tournament }) {
-  const memberFeeYen = tournament.memberFeeYen ?? tournament.categoryConfig?.fees?.member ?? tournament.feeYen;
-  const guestFeeYen = tournament.guestFeeYen ?? tournament.categoryConfig?.fees?.guest ?? tournament.feeYen;
+  const generalFeeYen = tournament.memberFeeYen ?? tournament.categoryConfig?.fees?.member ?? tournament.feeYen;
+  const premiumFeeYen = tournament.guestFeeYen ?? tournament.categoryConfig?.fees?.guest ?? tournament.feeYen;
   const categoryCapacities = tournament.categoryCapacities ?? tournament.categoryConfig?.categoryCapacities;
   const totalCapacity = sumCategoryCapacities(categoryCapacities) || tournament.capacity;
 
@@ -19,9 +19,9 @@ export function TournamentCard({ tournament }: { tournament: Tournament }) {
           <h2 className="mt-3 text-xl font-black leading-snug text-ink">{tournament.title}</h2>
         </div>
         <span className="rounded-md bg-coral-100 px-3 py-2 text-right text-xs font-black leading-5 text-coral-600">
-          会員 {formatYen(memberFeeYen)}
+          一般 {formatYen(generalFeeYen)}
           <br />
-          非会員 {formatYen(guestFeeYen)}
+          プレミアム {formatYen(premiumFeeYen)}
         </span>
       </div>
       <p className="min-h-12 text-sm leading-6 text-slate-600">{tournament.description}</p>

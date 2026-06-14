@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { normalizeMembershipType } from "@/lib/member";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
+import type { MembershipType } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +67,8 @@ export async function POST(request: Request) {
   const email = payload.email?.trim();
   const password = payload.password ?? "";
   const requestedLegacyMemberId = buildLegacyMemberId(payload.metadata?.legacy_member_id ?? payload.legacyVerification?.memberNumber);
+  const requestedMembershipType = normalizeMembershipType(payload.metadata?.membership_type, requestedLegacyMemberId) as MembershipType;
+  const finalMembershipType: MembershipType = requestedLegacyMemberId ? "premium" : requestedMembershipType;
 
   if (!email || !password) {
     return NextResponse.json(
@@ -79,6 +83,7 @@ export async function POST(request: Request) {
 
   const metadata: Record<string, string | null> = {
     ...(payload.metadata ?? {}),
+    membership_type: finalMembershipType,
     legacy_member_id: requestedLegacyMemberId || null,
     legacy_birth_date: payload.legacyVerification?.birthDate ?? null,
     legacy_phone_last4: normalizePhoneLast4(payload.legacyVerification?.phoneLast4) || null

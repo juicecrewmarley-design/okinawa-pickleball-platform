@@ -36,6 +36,7 @@ export const mockMember: MemberProfile = {
   residenceScope: "okinawa",
   municipality: "那覇市",
   role: "member",
+  membershipType: "premium",
   opr: 1280,
   ranking: 12
 };

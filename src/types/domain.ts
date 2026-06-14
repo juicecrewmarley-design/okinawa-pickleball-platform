@@ -6,6 +6,8 @@ export type Gender = "male" | "female" | "other" | "no_answer";
 
 export type MemberRole = "member" | "admin" | "sponsor";
 
+export type MembershipType = "general" | "premium";
+
 export type TournamentStatus = "draft" | "open" | "closed" | "finished";
 
 export type RankingCategory = "mens" | "womens" | "mixed" | "overall";
@@ -23,6 +25,7 @@ export type MemberProfile = {
   residenceScope: ResidenceScope;
   municipality?: string;
   role: MemberRole;
+  membershipType: MembershipType;
   opr: number;
   ranking: number;
 };
@@ -69,6 +72,7 @@ export type TournamentEntry = {
   pairOrTeamName?: string;
   teamName?: string;
   applicantType?: "member" | "guest";
+  applicantMembershipType?: MembershipType;
   applicantName?: string;
   applicantEmail?: string;
   applicantPhone?: string;

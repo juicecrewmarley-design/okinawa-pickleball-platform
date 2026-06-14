@@ -5,10 +5,10 @@ import Link from "next/link";
 import { CheckCircle2, Loader2, UserPlus } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { QrCodeCard } from "@/components/QrCodeCard";
-import { formatLegacyMemberId, generateMemberId, normalizeMemberNumber } from "@/lib/member";
+import { formatLegacyMemberId, generateMemberId, getMembershipLabel, normalizeMemberNumber } from "@/lib/member";
 import { municipalityToArea, okinawaMunicipalities, residenceScopeLabels } from "@/lib/okinawa";
 import { getSupabaseConfigStatus, isSupabaseConfigured } from "@/lib/supabase";
-import type { Gender, MemberProfile, ResidenceScope } from "@/types/domain";
+import type { Gender, MemberProfile, MembershipType, ResidenceScope } from "@/types/domain";
 
 const genderOptions: { value: Gender; label: string }[] = [
   { value: "male", label: "男性" },
@@ -64,11 +64,16 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [residenceScope, setResidenceScope] = useState<ResidenceScope>("okinawa");
   const [municipality, setMunicipality] = useState(okinawaMunicipalities[0]);
+  const [membershipType, setMembershipType] = useState<MembershipType>("general");
   const [supabaseReady, setSupabaseReady] = useState(isSupabaseConfigured);
 
   useEffect(() => {
     setMemberId(generateMemberId());
     getSupabaseConfigStatus().then((status) => setSupabaseReady(status.isConfigured));
+    const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    if (requestedMode === "new" || requestedMode === "legacy") {
+      selectRegistrationMode(requestedMode);
+    }
   }, []);
 
   function resetFormValues(mode: RegistrationMode) {
@@ -83,6 +88,7 @@ export default function RegisterPage() {
     setEmail("");
     setResidenceScope("okinawa");
     setMunicipality(okinawaMunicipalities[0]);
+    setMembershipType(mode === "legacy" ? "premium" : "general");
     setVerifiedLegacyMemberId("");
     setLegacyBirthDate("");
     setLegacyPhoneLast4("");
@@ -108,6 +114,10 @@ export default function RegisterPage() {
     resetFormValues(mode);
     if (mode === "new") {
       setMemberId(generateMemberId());
+      setMembershipType("general");
+    }
+    if (mode === "legacy") {
+      setMembershipType("premium");
     }
   }
 
@@ -185,6 +195,7 @@ export default function RegisterPage() {
     const selectedMunicipality = residenceScope === "okinawa" ? municipality : "";
     const area = residenceScope === "okinawa" ? municipalityToArea(selectedMunicipality) : "other";
     const issuedMemberId = requestedLegacyMemberId || memberId || generateMemberId();
+    const finalMembershipType: MembershipType = registrationMode === "legacy" ? "premium" : membershipType;
 
     if (registrationMode === "legacy" && normalizedLegacyMemberNumber.length !== 4) {
       setMessage("番号引き継ぎの方は、L列のOKP番号4桁を入力して照合してください。");
@@ -217,6 +228,7 @@ export default function RegisterPage() {
       residenceScope,
       municipality: selectedMunicipality,
       role: "member",
+      membershipType: finalMembershipType,
       opr: 0,
       ranking: 0
     };
@@ -231,6 +243,7 @@ export default function RegisterPage() {
         area: profile.area,
         residence_scope: profile.residenceScope,
         municipality: profile.municipality,
+        membership_type: finalMembershipType,
         legacy_birth_date: registrationMode === "legacy" ? legacyBirthDate || null : null,
         legacy_member_id: requestedLegacyMemberId || null,
         legacy_phone_last4: registrationMode === "legacy" ? normalizeMemberNumber(legacyPhoneLast4).slice(-4) || null : null
@@ -326,6 +339,44 @@ export default function RegisterPage() {
               選択へ戻る
             </button>
           </div>
+          {registrationMode === "new" ? (
+            <div className="mb-5 rounded-lg border border-ocean-100 bg-ocean-50 p-4">
+              <p className="text-sm font-black text-ocean-700">会員種別</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {(["general", "premium"] as MembershipType[]).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setMembershipType(type)}
+                    className={`focus-ring rounded-md border px-4 py-4 text-left transition ${
+                      membershipType === type
+                        ? "border-ocean-500 bg-white text-ink shadow-soft"
+                        : "border-ocean-100 bg-white/70 text-slate-600 hover:bg-white"
+                    }`}
+                  >
+                    <span className="block text-lg font-black">{getMembershipLabel(type)}</span>
+                    <span className="mt-1 block text-sm leading-6">
+                      {type === "general" ? "年会費無料" : "年会費2,000円。大会参加料がプレミアム会員料金になります。"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {membershipType === "premium" ? (
+                <div className="mt-4 rounded-md border border-coral-200 bg-white p-4 text-sm leading-7 text-slate-700">
+                  <p className="font-black text-coral-600">PayPay決済</p>
+                  <p className="mt-1">年会費2,000円をPayPayでお支払いください。決済画面のQRコードやリンクは、正式運用時に協会のPayPay情報へ差し替えます。</p>
+                  <div className="mt-3 grid place-items-center rounded-md bg-coral-100 p-5 text-center font-black text-coral-700">
+                    PayPay決済画面
+                    <span className="mt-1 block text-xs font-bold">2,000円</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mb-5 rounded-lg border border-palm-200 bg-palm-100 p-4 text-sm font-bold leading-7 text-palm-700">
+              OKP-0001〜OKP-0209の既存会員は、自動的にプレミアム会員として登録されます。
+            </div>
+          )}
           {registrationMode === "legacy" ? (
             <div className="mb-5 rounded-lg border border-coral-200 bg-coral-100 p-4">
               <label className="grid gap-2 text-sm font-bold text-coral-700">
@@ -543,7 +594,7 @@ export default function RegisterPage() {
               </p>
             ) : (
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                Supabase本番環境では、DB側で次の空き番号を正式発行します。
+                新規会員IDはOKP-1500以降で発行します。Supabase本番環境では、DB側で次の空き番号を正式発行します。
               </p>
             )}
           </div>

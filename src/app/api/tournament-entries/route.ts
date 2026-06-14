@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { normalizeMembershipType } from "@/lib/member";
 import { getSupabaseServerConfig } from "@/lib/supabase-env";
+import type { MembershipType } from "@/types/domain";
 
 type ApplicantType = "member" | "guest";
 type EntryType = "doubles" | "team";
@@ -8,6 +10,7 @@ type EntryType = "doubles" | "team";
 type EntryPayload = {
   applicantEmail?: string | null;
   applicantMemberId?: string | null;
+  applicantMembershipType?: MembershipType | null;
   applicantName?: string | null;
   applicantPhone?: string | null;
   applicantType?: ApplicantType;
@@ -26,7 +29,9 @@ type EntryPayload = {
 type MemberLookupRow = {
   email: string | null;
   full_name: string;
+  id?: string | null;
   member_id: string;
+  membership_type?: MembershipType | null;
   phone: string | null;
 };
 
@@ -103,7 +108,30 @@ async function findMember(supabase: SupabaseClient, memberId?: string | null) {
   const variants = buildMemberIdVariants(memberId);
   if (variants.length === 0) return null;
 
-  for (const tableName of ["profiles", "legacy_members"] as const) {
+  const primaryProfileLookup = await supabase
+    .from("profiles")
+    .select("id,member_id,full_name,email,phone,membership_type")
+    .in("member_id", variants)
+    .limit(10);
+  let profileData = primaryProfileLookup.data as MemberLookupRow[] | null;
+  let profileError = primaryProfileLookup.error;
+
+  if (profileError && [profileError.message, profileError.details].filter(Boolean).join(" ").includes("membership_type")) {
+    const fallback = await supabase
+      .from("profiles")
+      .select("id,member_id,full_name,email,phone")
+      .in("member_id", variants)
+      .limit(10);
+    profileData = fallback.data as MemberLookupRow[] | null;
+    profileError = fallback.error;
+  }
+
+  if (profileError) throw profileError;
+
+  const profileMember = pickPreferredMember(profileData as MemberLookupRow[] | null, variants);
+  if (profileMember) return profileMember;
+
+  for (const tableName of ["legacy_members"] as const) {
     const { data, error } = await supabase
       .from(tableName)
       .select("member_id,full_name,email,phone")
@@ -124,8 +152,8 @@ function getSupabaseErrorMessage(error: SupabaseErrorLike) {
 
   if (error.code === "PGRST204") {
     return missingColumn
-      ? `エントリー保存に必要なカラム '${missingColumn}' がSupabaseにありません。supabase/tournament-entries-repair.sql をSQL Editorで実行してください。`
-      : "エントリー保存に必要なカラムがSupabaseにありません。supabase/tournament-entries-repair.sql をSQL Editorで実行してください。";
+      ? `エントリー保存に必要なカラム '${missingColumn}' がSupabaseにありません。supabase/membership-entry-update.sql をSQL Editorで実行してください。`
+      : "エントリー保存に必要なカラムがSupabaseにありません。supabase/membership-entry-update.sql をSQL Editorで実行してください。";
   }
 
   if (error.code === "23503") {
@@ -152,6 +180,33 @@ function toLookupError(error: SupabaseErrorLike | null) {
     details: error.details ?? null,
     message: error.message ?? null
   };
+}
+
+async function findReciprocalEntry({
+  applicantMemberId,
+  category,
+  partnerMemberId,
+  supabase,
+  tournamentId
+}: {
+  applicantMemberId: string;
+  category: string;
+  partnerMemberId: string;
+  supabase: SupabaseClient;
+  tournamentId: string;
+}) {
+  const { data, error } = await supabase
+    .from("tournament_entries")
+    .select("id")
+    .eq("tournament_id", tournamentId)
+    .eq("category", category)
+    .eq("applicant_member_id", partnerMemberId)
+    .eq("partner_member_id", applicantMemberId)
+    .limit(1);
+
+  if (error) throw error;
+
+  return data?.[0]?.id ? String(data[0].id) : null;
 }
 
 export async function POST(request: Request) {
@@ -209,7 +264,7 @@ export async function POST(request: Request) {
 
   const { data: tournament, error: tournamentError } = await supabase
     .from("tournaments")
-    .select("id,status,title")
+    .select("id,status,title,member_fee_yen,guest_fee_yen")
     .eq("id", receivedTournamentId)
     .maybeSingle();
 
@@ -250,6 +305,14 @@ export async function POST(request: Request) {
     const applicantType: ApplicantType = payload.applicantType === "guest" ? "guest" : "member";
     const entryType: EntryType = payload.entryType === "team" ? "team" : "doubles";
     const applicantMember = applicantType === "member" ? await findMember(supabase, payload.applicantMemberId) : null;
+    const applicantMembershipType = normalizeMembershipType(
+      applicantMember?.membership_type ?? payload.applicantMembershipType,
+      applicantMember?.member_id ?? payload.applicantMemberId ?? ""
+    );
+    const serverEntryFeeYen =
+      applicantMembershipType === "premium"
+        ? Math.max(0, Number(tournament.guest_fee_yen ?? payload.entryFeeYen ?? 0))
+        : Math.max(0, Number(tournament.member_fee_yen ?? payload.entryFeeYen ?? 0));
 
     if (applicantType === "member" && !applicantMember) {
       return NextResponse.json(
@@ -340,21 +403,33 @@ export async function POST(request: Request) {
           )
         : [];
 
+    const entryCategory = compact(payload.category);
+    const reciprocalEntryId =
+      entryType === "doubles" && applicantMember && partnerMember
+        ? await findReciprocalEntry({
+            applicantMemberId: applicantMember.member_id,
+            category: entryCategory,
+            partnerMemberId: partnerMember.member_id,
+            supabase,
+            tournamentId: receivedTournamentId
+          })
+        : null;
     const isLinked =
       entryType === "doubles"
-        ? applicantType === "member" && Boolean(applicantMember && partnerMember)
+        ? Boolean(reciprocalEntryId)
         : applicantType === "member" && Boolean(applicantMember) && teamMembers.length === 3 && teamMembers.every((member) => member.memberId);
 
     const entry = {
       applicant_email: applicantEmail,
       applicant_member_id: applicantType === "member" ? applicantMember?.member_id ?? compact(payload.applicantMemberId) : null,
+      applicant_membership_type: applicantMembershipType,
       applicant_name: applicantName,
       applicant_phone: applicantPhone,
       applicant_type: applicantType,
-      category: compact(payload.category),
+      category: entryCategory,
       class_or_age_category: compact(payload.classOrAgeCategory),
       division: compact(payload.division),
-      entry_fee_yen: Number.isFinite(payload.entryFeeYen) ? Math.max(0, Number(payload.entryFeeYen)) : 0,
+      entry_fee_yen: Number.isFinite(serverEntryFeeYen) ? serverEntryFeeYen : 0,
       entry_type: entryType,
       linking_status: isLinked ? "linked" : "waiting",
       pair_or_team_name: entryType === "team" ? compact(payload.teamName) || null : null,
@@ -364,10 +439,10 @@ export async function POST(request: Request) {
       team_members: entryType === "team" ? teamMembers : [],
       team_name: entryType === "team" ? compact(payload.teamName) || null : null,
       tournament_id: receivedTournamentId,
-      user_id: null
+      user_id: applicantMember?.id ?? null
     };
 
-    const { error } = await supabase.from("tournament_entries").insert(entry);
+    const { data: insertedEntry, error } = await supabase.from("tournament_entries").insert(entry).select("id").single();
 
     if (error) {
       console.error("Tournament entry insert failed", {
@@ -390,6 +465,26 @@ export async function POST(request: Request) {
         },
         { status: 500 }
       );
+    }
+
+    if (isLinked && reciprocalEntryId && insertedEntry?.id) {
+      const { error: updateError } = await supabase
+        .from("tournament_entries")
+        .update({
+          linking_status: "linked",
+          status: "confirmed"
+        })
+        .in("id", [reciprocalEntryId, insertedEntry.id]);
+
+      if (updateError) {
+        console.error("Tournament reciprocal entry update failed", {
+          code: updateError.code,
+          details: updateError.details,
+          message: updateError.message,
+          reciprocalEntryId,
+          insertedEntryId: insertedEntry.id
+        });
+      }
     }
 
     return NextResponse.json({
