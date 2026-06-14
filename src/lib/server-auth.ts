@@ -13,6 +13,7 @@ export const authCookieNames = {
 export type ServerAuthProfile = {
   email: string;
   id: string;
+  memberId: string;
   role: MemberRole;
 };
 
@@ -88,7 +89,7 @@ export async function getServerAuthContextWithDiagnostics(): Promise<ServerAuthC
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id, email, role")
+    .select("id, email, member_id, role")
     .eq("id", userData.user.id)
     .maybeSingle();
 
@@ -112,6 +113,7 @@ export async function getServerAuthContextWithDiagnostics(): Promise<ServerAuthC
       profile: {
         email,
         id: profile.id,
+        memberId: profile.member_id,
         role
       },
       supabase

@@ -2,13 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, CalendarDays, Home, IdCard, LockKeyhole, Shield, Trophy, Users } from "lucide-react";
+import { Bell, CalendarDays, Home, IdCard, Shield, Trophy } from "lucide-react";
 import { clsx } from "clsx";
 
 const navItems = [
   { href: "/", label: "ホーム", icon: Home },
-  { href: "/register", label: "登録", icon: Users },
-  { href: "/login", label: "ログイン", icon: LockKeyhole },
   { href: "/mypage", label: "会員証", icon: IdCard },
   { href: "/tournaments", label: "大会", icon: CalendarDays },
   { href: "/rankings", label: "OPR", icon: Trophy },
