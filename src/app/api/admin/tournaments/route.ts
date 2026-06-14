@@ -21,6 +21,24 @@ type TournamentPayload = {
 };
 
 const tournamentSelectColumns = "id,title";
+const tournamentListColumns =
+  "id,title,description,venue,start_at,entry_deadline,member_fee_yen,guest_fee_yen,capacity,categories,status,created_at,updated_at";
+
+type TournamentRow = {
+  capacity: number | null;
+  categories: string[] | null;
+  created_at: string;
+  description: string;
+  entry_deadline: string | null;
+  guest_fee_yen: number | null;
+  id: string;
+  member_fee_yen: number | null;
+  start_at: string;
+  status: "draft" | "open" | "closed" | "finished";
+  title: string;
+  updated_at: string;
+  venue: string;
+};
 
 type SupabaseInsertError = {
   code?: string;
@@ -102,6 +120,79 @@ function revalidateTournamentPages(tournamentId: string) {
   revalidatePath("/");
   revalidatePath("/tournaments");
   revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export async function GET() {
+  const config = getSupabaseServerConfig();
+  const authResult = await getServerAuthContextWithDiagnostics();
+
+  if (!authResult.context) {
+    return NextResponse.json(
+      {
+        diagnostics: authResult.diagnostics,
+        ok: false,
+        message: "ログイン情報を取得できませんでした。もう一度管理者ログインしてください。"
+      },
+      { status: 401 }
+    );
+  }
+
+  if (authResult.context.profile.role !== "admin") {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: "管理者権限がありません。"
+      },
+      { status: 403 }
+    );
+  }
+
+  const supabase = config.supabaseServiceRoleKey
+    ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: {
+          persistSession: false
+        }
+      })
+    : authResult.context.supabase;
+
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select(tournamentListColumns)
+    .order("start_at", { ascending: false });
+
+  if (error) {
+    console.error("Admin tournaments lookup failed", error);
+    return NextResponse.json(
+      {
+        details: error.details,
+        ok: false,
+        message: `大会一覧を取得できませんでした。${error.message ?? ""}`.trim()
+      },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    tournaments: ((data ?? []) as TournamentRow[]).map((tournament) => ({
+      capacity: tournament.capacity ?? 0,
+      categories: tournament.categories ?? [],
+      createdAt: tournament.created_at,
+      description: tournament.description,
+      entryDeadline: tournament.entry_deadline ?? "",
+      guestFeeYen: tournament.guest_fee_yen ?? 0,
+      id: tournament.id,
+      memberFeeYen: tournament.member_fee_yen ?? 0,
+      startAt: tournament.start_at,
+      status: tournament.status,
+      title: tournament.title,
+      updatedAt: tournament.updated_at,
+      venue: tournament.venue
+    }))
+  });
 }
 
 export async function POST(request: Request) {

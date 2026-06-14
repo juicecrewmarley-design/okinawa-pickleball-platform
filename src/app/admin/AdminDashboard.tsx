@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bell, Building2, CalendarPlus, ClipboardList, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
+import { Bell, Building2, CalendarDays, CalendarPlus, ClipboardList, Download, Loader2, Medal, Save, Shield, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
 import { getMembershipLabel } from "@/lib/member";
@@ -16,10 +16,11 @@ import {
   sumCategoryCapacities,
   teamAgeCategories
 } from "@/lib/tournament-categories";
-import type { Gender, MemberArea, MembershipType, PaymentMethod, ResidenceScope, TournamentCategoryConfig } from "@/types/domain";
+import type { Gender, MemberArea, MembershipType, PaymentMethod, ResidenceScope, TournamentCategoryConfig, TournamentStatus } from "@/types/domain";
 
 const adminSections = [
   { id: "members", label: "会員", icon: Users },
+  { id: "tournament-list", label: "大会一覧", icon: CalendarDays },
   { id: "tournaments", label: "大会作成", icon: CalendarPlus },
   { id: "entries", label: "参加者", icon: ClipboardList },
   { id: "results", label: "結果・OPR", icon: Trophy },
@@ -77,6 +78,28 @@ type AdminMembersResult = {
   members?: AdminMember[];
   message?: string;
   ok?: boolean;
+};
+
+type AdminTournament = {
+  capacity: number;
+  categories: string[];
+  createdAt: string;
+  description: string;
+  entryDeadline: string;
+  guestFeeYen: number;
+  id: string;
+  memberFeeYen: number;
+  startAt: string;
+  status: TournamentStatus;
+  title: string;
+  updatedAt: string;
+  venue: string;
+};
+
+type AdminTournamentsResult = {
+  message?: string;
+  ok?: boolean;
+  tournaments?: AdminTournament[];
 };
 
 type AdminEntry = {
@@ -143,17 +166,104 @@ function getPaymentMethodLabel(method: PaymentMethod) {
   return method === "paypay" ? "PayPay" : "現金";
 }
 
+function getTournamentStatusLabel(status: TournamentStatus) {
+  if (status === "draft") return "未公開";
+  if (status === "open") return "公開";
+  if (status === "closed") return "受付終了";
+  return "終了";
+}
+
+function isTournamentPublished(status: TournamentStatus) {
+  return status !== "draft";
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ja-JP");
+}
+
+function formatDate(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ja-JP");
+}
+
+function toCsvCell(value: unknown) {
+  const stringValue = value === null || value === undefined ? "" : String(value);
+  return `"${stringValue.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
+  const csv = rows.map((row) => row.map(toCsvCell).join(",")).join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getYearFromDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : String(date.getFullYear());
+}
+
 export default function AdminDashboard() {
   const [adminMembers, setAdminMembers] = useState<AdminMember[]>([]);
+  const [adminTournaments, setAdminTournaments] = useState<AdminTournament[]>([]);
   const [adminEntries, setAdminEntries] = useState<AdminEntry[]>([]);
   const [adminMembersLoading, setAdminMembersLoading] = useState(true);
+  const [adminTournamentsLoading, setAdminTournamentsLoading] = useState(true);
   const [adminEntriesLoading, setAdminEntriesLoading] = useState(true);
   const [adminMembersError, setAdminMembersError] = useState("");
+  const [adminTournamentsError, setAdminTournamentsError] = useState("");
   const [adminEntriesError, setAdminEntriesError] = useState("");
+  const [selectedTournamentYear, setSelectedTournamentYear] = useState(String(new Date().getFullYear()));
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingAction, setSavingAction] = useState<string | null>(null);
   const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
+
+  const loadAdminTournaments = useCallback(async () => {
+    setAdminTournamentsLoading(true);
+    setAdminTournamentsError("");
+
+    try {
+      const response = await fetch("/api/admin/tournaments", { cache: "no-store" });
+      const result = (await response.json()) as AdminTournamentsResult;
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message ?? "大会一覧を取得できませんでした。");
+      }
+
+      setAdminTournaments(result.tournaments ?? []);
+    } catch (error) {
+      setAdminTournaments([]);
+      setAdminTournamentsError(error instanceof Error ? error.message : "大会一覧を取得できませんでした。");
+    } finally {
+      setAdminTournamentsLoading(false);
+    }
+  }, []);
+
+  const tournamentYears = useMemo(() => {
+    const years = new Set<string>([String(new Date().getFullYear())]);
+
+    adminTournaments.forEach((tournament) => {
+      const year = getYearFromDate(tournament.startAt);
+      if (year) years.add(year);
+    });
+
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [adminTournaments]);
+
+  const filteredAdminTournaments = useMemo(() => {
+    if (selectedTournamentYear === "all") return adminTournaments;
+    return adminTournaments.filter((tournament) => getYearFromDate(tournament.startAt) === selectedTournamentYear);
+  }, [adminTournaments, selectedTournamentYear]);
 
   useEffect(() => {
     let active = true;
@@ -213,12 +323,13 @@ export default function AdminDashboard() {
     }
 
     loadMembers();
+    loadAdminTournaments();
     loadEntries();
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadAdminTournaments]);
 
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
@@ -265,6 +376,7 @@ export default function AdminDashboard() {
     const memberFeeYenText = String(formData.get("memberFeeYen") ?? "").trim();
     const guestFeeYenText = String(formData.get("guestFeeYen") ?? "").trim();
     const defaultCapacityText = String(formData.get("defaultCapacity") ?? "").trim();
+    const status = String(formData.get("status") ?? "open") === "draft" ? "draft" : "open";
     const description = String(formData.get("description") ?? "").trim();
     const missingFields = [
       !title ? "大会名" : "",
@@ -327,7 +439,7 @@ export default function AdminDashboard() {
       categories,
       category_capacities: categoryCapacities,
       category_config: categoryConfig,
-      status: "open"
+      status
     };
 
     setSavingAction("tournament");
@@ -337,6 +449,7 @@ export default function AdminDashboard() {
 
     if (saved) {
       setSavedTournamentId(saved.id ?? null);
+      await loadAdminTournaments();
       event.currentTarget.reset();
     }
   }
@@ -372,6 +485,85 @@ export default function AdminDashboard() {
   function handleResultSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("試合結果とOPRポイントの入力内容を受け付けました。Supabase接続後はmatch_resultsとopr_pointsへ保存します。");
+  }
+
+  function handleMembersExport() {
+    downloadCsv("members.csv", [
+      ["会員ID", "氏名", "ふりがな", "会員種別", "性別", "生年月日", "居住地", "電話", "メール", "権限"],
+      ...adminMembers.map((member) => [
+        member.memberId,
+        member.fullName,
+        member.furigana,
+        getMembershipLabel(member.membershipType),
+        member.gender,
+        member.birthDate,
+        formatResidence(member.residenceScope, member.municipality),
+        member.phone,
+        member.email,
+        member.role
+      ])
+    ]);
+  }
+
+  function handleTournamentEntriesExport() {
+    downloadCsv("tournament-entries.csv", [
+      [
+        "大会名",
+        "開催日",
+        "申込者名",
+        "会員ID",
+        "会員種別",
+        "カテゴリ",
+        "エントリー種別",
+        "ペア名",
+        "ペア会員ID",
+        "チーム名",
+        "状態",
+        "支払い方法",
+        "参加費",
+        "メール",
+        "電話",
+        "登録日時"
+      ],
+      ...adminEntries.map((entry) => [
+        entry.tournamentTitle,
+        formatDate(entry.tournamentStartAt),
+        entry.applicantName,
+        entry.applicantMemberId,
+        entry.applicantType === "guest" ? "非会員" : getMembershipLabel(entry.applicantMembershipType),
+        entry.category,
+        entry.entryType === "team" ? "チーム戦" : "ダブルス",
+        entry.partnerName,
+        entry.partnerMemberId,
+        entry.teamName,
+        getEntryStatusLabel(entry),
+        getPaymentMethodLabel(entry.paymentMethod),
+        entry.entryFeeYen,
+        entry.applicantEmail,
+        entry.applicantPhone,
+        formatDateTime(entry.createdAt)
+      ])
+    ]);
+  }
+
+  function handleTournamentsExport() {
+    downloadCsv(`tournaments-${selectedTournamentYear}.csv`, [
+      ["年度", "大会名", "公開", "未公開", "状態", "会場", "開催日時", "申込締切", "一般会員参加料", "プレミアム会員参加料", "定員", "カテゴリ"],
+      ...filteredAdminTournaments.map((tournament) => [
+        getYearFromDate(tournament.startAt),
+        tournament.title,
+        isTournamentPublished(tournament.status) ? "✓" : "",
+        !isTournamentPublished(tournament.status) ? "✓" : "",
+        getTournamentStatusLabel(tournament.status),
+        tournament.venue,
+        formatDateTime(tournament.startAt),
+        formatDateTime(tournament.entryDeadline),
+        tournament.memberFeeYen,
+        tournament.guestFeeYen,
+        tournament.capacity,
+        tournament.categories.join(" / ")
+      ])
+    ]);
   }
 
   return (
@@ -429,7 +621,10 @@ export default function AdminDashboard() {
 
       <div className="space-y-6">
         <section id="members" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
-          <h2 className="text-2xl font-black">会員一覧</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl font-black">会員一覧</h2>
+            <ExportButton disabled={adminMembersLoading || adminMembers.length === 0} label="会員一覧CSV" onClick={handleMembersExport} />
+          </div>
           <div className="mt-5 overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-ocean-50 text-xs uppercase tracking-[0.16em] text-ocean-700">
@@ -478,6 +673,102 @@ export default function AdminDashboard() {
           </div>
         </section>
 
+        <section id="tournament-list" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-black">大会一覧</h2>
+              <p className="mt-1 text-sm font-bold text-slate-600">年度ごとに大会を確認し、公開・未公開の状態も見られます。</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                年度
+                <select
+                  value={selectedTournamentYear}
+                  onChange={(event) => setSelectedTournamentYear(event.target.value)}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-2"
+                >
+                  <option value="all">すべて</option>
+                  {tournamentYears.map((year) => (
+                    <option key={year} value={year}>
+                      {year}年
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ExportButton
+                disabled={adminTournamentsLoading || filteredAdminTournaments.length === 0}
+                label="大会一覧CSV"
+                onClick={handleTournamentsExport}
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full min-w-[920px] text-left text-sm">
+              <thead className="bg-ocean-50 text-xs uppercase tracking-[0.16em] text-ocean-700">
+                <tr>
+                  <th className="px-4 py-3">年度</th>
+                  <th className="px-4 py-3">大会名</th>
+                  <th className="px-4 py-3">公開</th>
+                  <th className="px-4 py-3">未公開</th>
+                  <th className="px-4 py-3">状態</th>
+                  <th className="px-4 py-3">開催日時</th>
+                  <th className="px-4 py-3">会場</th>
+                  <th className="px-4 py-3">一般会員</th>
+                  <th className="px-4 py-3">プレミアム会員</th>
+                  <th className="px-4 py-3">定員</th>
+                  <th className="px-4 py-3">カテゴリ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ocean-50">
+                {adminTournamentsLoading ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={11}>
+                      大会一覧を読み込み中です。
+                    </td>
+                  </tr>
+                ) : adminTournamentsError ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={11}>
+                      {adminTournamentsError}
+                    </td>
+                  </tr>
+                ) : filteredAdminTournaments.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={11}>
+                      選択した年度の大会はまだありません。
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAdminTournaments.map((tournament) => (
+                    <tr key={tournament.id}>
+                      <td className="px-4 py-4 font-bold text-slate-600">{getYearFromDate(tournament.startAt)}</td>
+                      <td className="px-4 py-4 font-black text-ink">
+                        <Link href={`/tournaments/${tournament.id}`} className="hover:text-ocean-700">
+                          {tournament.title}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-4 text-lg font-black text-palm-700">{isTournamentPublished(tournament.status) ? "✓" : ""}</td>
+                      <td className="px-4 py-4 text-lg font-black text-coral-700">{!isTournamentPublished(tournament.status) ? "✓" : ""}</td>
+                      <td className="px-4 py-4">
+                        <span className={`rounded-full px-3 py-1 text-xs font-black ${isTournamentPublished(tournament.status) ? "bg-palm-100 text-palm-700" : "bg-coral-100 text-coral-700"}`}>
+                          {getTournamentStatusLabel(tournament.status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">{formatDateTime(tournament.startAt)}</td>
+                      <td className="px-4 py-4">{tournament.venue}</td>
+                      <td className="px-4 py-4">{tournament.memberFeeYen.toLocaleString("ja-JP")}円</td>
+                      <td className="px-4 py-4">{tournament.guestFeeYen.toLocaleString("ja-JP")}円</td>
+                      <td className="px-4 py-4">{tournament.capacity}名</td>
+                      <td className="px-4 py-4">{tournament.categories.join(" / ") || "-"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section id="tournaments" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
           <form noValidate onSubmit={handleTournamentSubmit}>
             <h2 className="text-2xl font-black">大会作成</h2>
@@ -489,6 +780,13 @@ export default function AdminDashboard() {
               <AdminInput name="memberFeeYen" label="一般会員参加料" type="number" placeholder="3000" required />
               <AdminInput name="guestFeeYen" label="プレミアム会員参加料" type="number" placeholder="2000" required />
               <AdminInput name="defaultCapacity" label="未入力時の定員" type="number" placeholder="16" required />
+              <label className="grid gap-2 text-sm font-bold text-slate-700">
+                公開状態
+                <select name="status" defaultValue="open" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+                  <option value="open">公開</option>
+                  <option value="draft">未公開</option>
+                </select>
+              </label>
               <fieldset className="rounded-md border border-ocean-100 p-4 sm:col-span-2">
                 <legend className="px-2 text-sm font-black text-ink">ダブルス種目</legend>
                 <div className="mt-3 grid gap-4 md:grid-cols-2">
@@ -523,7 +821,10 @@ export default function AdminDashboard() {
         </section>
 
         <section id="entries" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
-          <h2 className="text-2xl font-black">大会参加者一覧</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-2xl font-black">大会参加者一覧</h2>
+            <ExportButton disabled={adminEntriesLoading || adminEntries.length === 0} label="参加者CSV" onClick={handleTournamentEntriesExport} />
+          </div>
           <div className="mt-5 grid gap-4">
             {adminEntriesLoading ? (
               <p className="rounded-md bg-ocean-50 p-4 text-sm font-bold text-slate-600">大会参加者一覧を読み込み中です。</p>
@@ -763,6 +1064,20 @@ function SaveButton({ label, icon, loading }: { label: string; icon?: React.Reac
     >
       {loading ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : icon ?? <Save className="size-5" aria-hidden="true" />}
       {loading ? "保存中..." : label}
+    </button>
+  );
+}
+
+function ExportButton({ disabled, label, onClick }: { disabled?: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="focus-ring inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-palm-100 px-4 py-3 text-sm font-black text-palm-700 transition hover:bg-palm-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Download className="size-4" aria-hidden="true" />
+      {label}
     </button>
   );
 }
