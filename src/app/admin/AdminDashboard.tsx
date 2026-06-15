@@ -677,12 +677,13 @@ export default function AdminDashboard() {
             <ExportButton disabled={adminMembersLoading || adminMembers.length === 0} label="会員一覧CSV" onClick={handleMembersExport} />
           </div>
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[820px] text-left text-sm">
               <thead className="bg-ocean-50 text-xs uppercase tracking-[0.16em] text-ocean-700">
                 <tr>
                   <th className="px-4 py-3">会員ID</th>
                   <th className="px-4 py-3">氏名</th>
                   <th className="px-4 py-3">会員種別</th>
+                  <th className="px-4 py-3">生年月日</th>
                   <th className="px-4 py-3">居住地</th>
                   <th className="px-4 py-3">電話</th>
                   <th className="px-4 py-3">メール</th>
@@ -692,19 +693,19 @@ export default function AdminDashboard() {
               <tbody className="divide-y divide-ocean-50">
                 {adminMembersLoading ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={7}>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={8}>
                       会員一覧を読み込み中です。
                     </td>
                   </tr>
                 ) : adminMembersError ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={7}>
+                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={8}>
                       {adminMembersError}
                     </td>
                   </tr>
                 ) : adminMembers.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={7}>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={8}>
                       登録済み会員はまだありません。
                     </td>
                   </tr>
@@ -713,6 +714,7 @@ export default function AdminDashboard() {
                     <td className="px-4 py-4 font-bold text-slate-600">{member.memberId}</td>
                     <td className="px-4 py-4 font-black text-ink">{member.fullName}</td>
                     <td className="px-4 py-4">{getMembershipLabel(member.membershipType)}</td>
+                    <td className="px-4 py-4">{member.birthDate ? formatDate(member.birthDate) : "-"}</td>
                     <td className="px-4 py-4">{formatResidence(member.residenceScope, member.municipality)}</td>
                     <td className="px-4 py-4">{member.phone || "-"}</td>
                     <td className="px-4 py-4">{member.email}</td>
