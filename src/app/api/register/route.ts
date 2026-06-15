@@ -94,6 +94,30 @@ function getRegisterErrorMessage(error: SupabaseErrorLike) {
   return message || "新規ユーザーを保存できませんでした。";
 }
 
+function getRequestOrigin(request: Request) {
+  const origin = request.headers.get("origin")?.trim();
+  if (origin) return origin.replace(/\/$/, "");
+
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || request.headers.get("host")?.trim();
+  if (!host) return "";
+
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const protocol = forwardedProto || (host.includes("localhost") ? "http" : "https");
+
+  return `${protocol}://${host}`;
+}
+
+function getEmailRedirectTo(request: Request) {
+  const configuredUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim()}` : "");
+  const origin = getRequestOrigin(request) || configuredUrl.replace(/\/$/, "");
+
+  return origin ? `${origin}/login?verified=1` : undefined;
+}
+
 export async function POST(request: Request) {
   const config = getSupabaseServerConfig();
 
@@ -242,7 +266,8 @@ export async function POST(request: Request) {
     email,
     password,
     options: {
-      data: metadata
+      data: metadata,
+      emailRedirectTo: getEmailRedirectTo(request)
     }
   });
 

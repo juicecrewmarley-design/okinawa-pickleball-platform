@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, LockKeyhole, Shield } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
@@ -10,6 +10,13 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"member" | "admin">("member");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("verified") === "1") {
+      setMessage("メール確認が完了しました。ログインしてください。");
+    }
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

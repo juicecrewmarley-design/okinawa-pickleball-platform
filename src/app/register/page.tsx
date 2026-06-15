@@ -160,7 +160,7 @@ export default function RegisterPage() {
     setMessage("");
 
     if (normalizedNumber.length !== 4) {
-      setLegacyLookup({ text: "L列のOKP番号4桁を入力してください。例: 0001", tone: "error" });
+      setLegacyLookup({ text: "OKP番号4桁を入力してください。例: 0001", tone: "error" });
       return;
     }
 
@@ -232,7 +232,7 @@ export default function RegisterPage() {
 
     if (registrationMode === "legacy" && normalizedLegacyMemberNumber.length !== 4) {
       setMessageTone("error");
-      setMessage("番号引き継ぎの方は、L列のOKP番号4桁を入力して照合してください。");
+      setMessage("番号引き継ぎの方は、OKP番号4桁を入力して照合してください。");
       setLoading(false);
       return;
     }
@@ -360,7 +360,7 @@ export default function RegisterPage() {
             </span>
             <span className="mt-5 block text-2xl font-black text-ink">番号引き継ぐ方</span>
             <span className="mt-3 block text-sm leading-7 text-slate-600">
-              Googleフォームで発行済みのOKP番号がある方はこちら。L列の4桁番号と本人確認で情報を反映します。
+              Googleフォームで発行済みのOKP番号がある方はこちら。OKP番号4桁と本人確認で情報を反映します。
             </span>
           </button>
         </div>
@@ -425,36 +425,25 @@ export default function RegisterPage() {
           {registrationMode === "legacy" ? (
             <div className="mb-5 rounded-lg border border-coral-200 bg-coral-100 p-4">
               <label className="grid gap-2 text-sm font-bold text-coral-700">
-                L列のOKP番号4桁
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <input
-                    required
-                    name="legacyMemberNumber"
-                    value={legacyMemberNumber}
-                    onChange={(event) => {
-                      const nextNumber = normalizeMemberNumber(event.target.value).slice(0, 4);
-                      setLegacyMemberNumber(nextNumber);
-                      setLegacyLookup({ text: "", tone: "idle" });
-                      clearLegacyMemberDetails();
-                      if (nextNumber.length === 4 && (legacyBirthDate || normalizeMemberNumber(legacyPhoneLast4).length === 4)) {
-                        lookupLegacyMember(nextNumber);
-                      }
-                    }}
-                    inputMode="numeric"
-                    pattern="[0-9]{4}"
-                    className="focus-ring rounded-md border border-coral-200 px-3 py-3 text-ink"
-                    placeholder="例: 0001"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => lookupLegacyMember()}
-                    disabled={legacyLookup.tone === "loading"}
-                    className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {legacyLookup.tone === "loading" ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
-                    情報を反映
-                  </button>
-                </div>
+                OKP番号4桁
+                <input
+                  required
+                  name="legacyMemberNumber"
+                  value={legacyMemberNumber}
+                  onChange={(event) => {
+                    const nextNumber = normalizeMemberNumber(event.target.value).slice(0, 4);
+                    setLegacyMemberNumber(nextNumber);
+                    setLegacyLookup({ text: "", tone: "idle" });
+                    clearLegacyMemberDetails();
+                    if (nextNumber.length === 4 && (legacyBirthDate || normalizeMemberNumber(legacyPhoneLast4).length === 4)) {
+                      lookupLegacyMember(nextNumber);
+                    }
+                  }}
+                  inputMode="numeric"
+                  pattern="[0-9]{4}"
+                  className="focus-ring rounded-md border border-coral-200 px-3 py-3 text-ink"
+                  placeholder="例: 0001"
+                />
               </label>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm font-bold text-coral-700">
@@ -487,6 +476,15 @@ export default function RegisterPage() {
                   />
                 </label>
               </div>
+              <button
+                type="button"
+                onClick={() => lookupLegacyMember()}
+                disabled={legacyLookup.tone === "loading"}
+                className="focus-ring mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {legacyLookup.tone === "loading" ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
+                情報を反映
+              </button>
               {legacyLookup.text ? (
                 <p
                   className={`mt-3 text-sm font-bold leading-6 ${

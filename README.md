@@ -16,7 +16,7 @@
 - 管理者画面: 会員一覧、大会作成フォーム、参加者一覧、試合結果入力、お知らせ投稿、協賛企業登録の初期UIです。
 - OPRランキング: 男子ダブルス、女子ダブルス、ミックスダブルスをカテゴリ別に表示し、総合は男子・女子に分けて表示します。
 - お知らせ・協賛企業: イベント案内とスポンサー掲載ページです。
-- Googleフォーム既存会員ID引き継ぎ: 登録画面で番号引き継ぎを選び、L列の4桁番号と生年月日または電話番号下4桁で本人確認してから既存番号を引き継ぎます。
+- Googleフォーム既存会員ID引き継ぎ: 登録画面で番号引き継ぎを選び、OKP番号4桁と生年月日または電話番号下4桁で本人確認してから既存番号を引き継ぎます。
 
 Supabase未設定でもサンプルデータで画面確認できます。環境変数を設定すると、登録・ログイン・大会エントリーがSupabase向けに動きます。
 
@@ -77,6 +77,7 @@ Copy-Item .env.local.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_SITE_URL=https://okinawa-pickleball-platform.vercel.app
 ```
 
 Supabaseをまだ設定しない場合でも、サンプルデータで画面プレビューできます。
@@ -108,7 +109,7 @@ http://localhost:3000
 
 ## Googleフォーム既存会員の安全な引き継ぎ
 
-`legacy_members` は過去のGoogleフォーム会員データ、`profiles` はアプリに正式登録した会員データです。既存会員は登録画面で「番号引き継ぐ方」を選び、L列のOKP番号4桁に加えて、生年月日または電話番号下4桁で本人確認します。照合に成功するまで、氏名・メールアドレス・電話番号などの個人情報は画面に表示しません。
+`legacy_members` は過去のGoogleフォーム会員データ、`profiles` はアプリに正式登録した会員データです。既存会員は登録画面で「番号引き継ぐ方」を選び、OKP番号4桁に加えて、生年月日または電話番号下4桁で本人確認します。照合に成功するまで、氏名・メールアドレス・電話番号などの個人情報は画面に表示しません。
 
 引き継ぎ登録が完了すると、`profiles.member_id` に既存の会員IDを保存し、`legacy_members.claimed_by` と `legacy_members.claimed_at` に登録済み情報を記録します。すでに `claimed_by` が入っている会員番号は再利用できません。ブラウザ側から `legacy_members` を直接読むことはなく、必ずサーバーAPI経由で照合します。
 
@@ -259,6 +260,44 @@ Body:
 9. 迷惑メールに入らないか確認します。
 10. 10件程度を連続登録して、`email rate limit exceeded` が出ないことを確認します。
 11. 大会前など登録が集中する日は、事前にResendまたはSendGrid側の送信上限も確認します。
+
+### 確認メールが英語のままの場合
+
+Supabaseの初期テンプレートは英語です。アプリ側のコードだけではメール本文は日本語化されないため、Supabase Dashboardで `Authentication` → `Email Templates` → `Confirm signup` を開き、上記の日本語テンプレートを保存してください。
+
+保存後、もう一度新規登録を行い、件名と本文が日本語になっているか確認します。過去に送られたメールは自動では変わらないため、新しい登録メールで確認してください。
+
+### 確認メールのリンクがlocalhostになる場合
+
+Supabaseの `Site URL` または `Redirect URLs` が `http://localhost:3000` のままだと、スマホでメールを押した時にlocalhostへ飛び、「ページを開けません」になります。
+
+Supabase Dashboardで以下を設定してください。
+
+1. `Authentication` → `URL Configuration` を開きます。
+2. `Site URL` を本番URLにします。
+
+```text
+https://okinawa-pickleball-platform.vercel.app
+```
+
+3. `Redirect URLs` に以下を追加します。
+
+```text
+https://okinawa-pickleball-platform.vercel.app/login
+https://okinawa-pickleball-platform.vercel.app/login?verified=1
+http://localhost:3000/login
+http://localhost:3000/login?verified=1
+```
+
+4. VercelのEnvironment Variablesに以下を追加します。
+
+```text
+NEXT_PUBLIC_SITE_URL=https://okinawa-pickleball-platform.vercel.app
+```
+
+5. Vercelで再デプロイします。
+6. 本番URLから新規登録し、届いた確認メールのボタンを押します。
+7. `https://okinawa-pickleball-platform.vercel.app/login?verified=1` が開き、「メール確認が完了しました。ログインしてください。」と表示されればOKです。
 
 ## GitHub Private運用と公開前チェック
 
