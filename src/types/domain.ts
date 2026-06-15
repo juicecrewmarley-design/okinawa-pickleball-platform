@@ -53,6 +53,7 @@ export type TournamentCategoryConfig = {
   doubles: {
     divisions: string[];
     classes: string[];
+    classesByDivision?: Record<string, string[]>;
   };
   team: {
     enabled: boolean;

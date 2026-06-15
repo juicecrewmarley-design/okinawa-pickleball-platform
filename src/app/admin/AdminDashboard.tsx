@@ -32,6 +32,14 @@ function capacityInputName(category: string) {
   return `capacity:${category}`;
 }
 
+function getDefaultDoublesClassesByDivision() {
+  return Object.fromEntries(doublesDivisions.map((division) => [division, [...doublesClasses]])) as Record<string, string[]>;
+}
+
+function getDefaultTeamAgeCategories() {
+  return [...teamAgeCategories];
+}
+
 type AdminApiResult = {
   diagnostics?: {
     auth?: {
@@ -238,6 +246,11 @@ export default function AdminDashboard() {
   const [savingAction, setSavingAction] = useState<string | null>(null);
   const [deletingTournamentId, setDeletingTournamentId] = useState<string | null>(null);
   const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
+  const [selectedDoublesClassesByDivision, setSelectedDoublesClassesByDivision] = useState<Record<string, string[]>>(() =>
+    getDefaultDoublesClassesByDivision()
+  );
+  const [teamEnabled, setTeamEnabled] = useState(true);
+  const [selectedTeamAgeCategories, setSelectedTeamAgeCategories] = useState<string[]>(() => getDefaultTeamAgeCategories());
 
   const loadAdminTournaments = useCallback(async () => {
     setAdminTournamentsLoading(true);
@@ -281,6 +294,19 @@ export default function AdminDashboard() {
       return matchesYear && matchesStatus;
     });
   }, [adminTournaments, selectedTournamentStatus, selectedTournamentYear]);
+
+  const selectedDoublesCategories = useMemo(
+    () =>
+      doublesDivisions.flatMap((division) =>
+        (selectedDoublesClassesByDivision[division] ?? []).map((className) => `${division} / ${className}`)
+      ),
+    [selectedDoublesClassesByDivision]
+  );
+
+  const selectedTeamCategories = useMemo(
+    () => (teamEnabled ? selectedTeamAgeCategories.map((category) => `チーム戦 / ${category}`) : []),
+    [selectedTeamAgeCategories, teamEnabled]
+  );
 
   useEffect(() => {
     let active = true;
@@ -348,6 +374,43 @@ export default function AdminDashboard() {
     };
   }, [loadAdminTournaments]);
 
+  function toggleDoublesClass(division: string, className: string, checked: boolean) {
+    setSelectedDoublesClassesByDivision((current) => {
+      const selectedClasses = new Set(current[division] ?? []);
+
+      if (checked) {
+        selectedClasses.add(className);
+      } else {
+        selectedClasses.delete(className);
+      }
+
+      return {
+        ...current,
+        [division]: doublesClasses.filter((option) => selectedClasses.has(option))
+      };
+    });
+  }
+
+  function toggleTeamAgeCategory(category: string, checked: boolean) {
+    setSelectedTeamAgeCategories((current) => {
+      const selectedCategories = new Set(current);
+
+      if (checked) {
+        selectedCategories.add(category);
+      } else {
+        selectedCategories.delete(category);
+      }
+
+      return teamAgeCategories.filter((option) => selectedCategories.has(option));
+    });
+  }
+
+  function resetTournamentCategorySelection() {
+    setSelectedDoublesClassesByDivision(getDefaultDoublesClassesByDivision());
+    setTeamEnabled(true);
+    setSelectedTeamAgeCategories(getDefaultTeamAgeCategories());
+  }
+
   async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
     try {
       const response = await fetch(endpoint, {
@@ -412,10 +475,22 @@ export default function AdminDashboard() {
       return;
     }
 
+    const doublesClassesByDivision = Object.fromEntries(
+      doublesDivisions.map((division) => [
+        division,
+        doublesClasses.filter((className) => formData.getAll(`doublesClasses:${division}`).map(String).includes(className))
+      ])
+    ) as Record<string, string[]>;
+    const selectedDoublesDivisions = doublesDivisions.filter((division) => doublesClassesByDivision[division]?.length > 0);
+    const selectedDoublesClasses = doublesClasses.filter((className) =>
+      selectedDoublesDivisions.some((division) => doublesClassesByDivision[division]?.includes(className))
+    );
+
     const categoryConfig: TournamentCategoryConfig = {
       doubles: {
-        divisions: formData.getAll("doublesDivisions").map(String),
-        classes: formData.getAll("doublesClasses").map(String)
+        divisions: selectedDoublesDivisions,
+        classes: selectedDoublesClasses,
+        classesByDivision: doublesClassesByDivision
       },
       team: {
         enabled: formData.get("teamEnabled") === "on",
@@ -468,6 +543,7 @@ export default function AdminDashboard() {
       setSavedTournamentId(saved.id ?? null);
       await loadAdminTournaments();
       event.currentTarget.reset();
+      resetTournamentCategorySelection();
     }
   }
 
@@ -870,19 +946,61 @@ export default function AdminDashboard() {
               </label>
               <fieldset className="rounded-md border border-ocean-100 p-4 sm:col-span-2">
                 <legend className="px-2 text-sm font-black text-ink">ダブルス種目</legend>
-                <div className="mt-3 grid gap-4 md:grid-cols-2">
-                  <CheckboxGroup name="doublesDivisions" title="選択枠" options={doublesDivisions} defaultChecked />
-                  <CheckboxGroup name="doublesClasses" title="カテゴリ" options={doublesClasses} defaultChecked />
+                <div className="mt-3 grid gap-4 xl:grid-cols-3">
+                  {doublesDivisions.map((division) => (
+                    <div key={division} className="rounded-md bg-ocean-50 p-3">
+                      <p className="mb-2 text-sm font-black text-ocean-700">{division}（選択枠）</p>
+                      <div className="grid gap-2">
+                        {doublesClasses.map((className) => (
+                          <label key={`${division}:${className}`} className="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-bold text-slate-700">
+                            <input
+                              name={`doublesClasses:${division}`}
+                              value={className}
+                              type="checkbox"
+                              checked={selectedDoublesClassesByDivision[division]?.includes(className) ?? false}
+                              onChange={(event) => toggleDoublesClass(division, className, event.target.checked)}
+                              className="size-4 accent-ocean-500"
+                            />
+                            {className}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </fieldset>
               <fieldset className="rounded-md border border-ocean-100 p-4 sm:col-span-2">
                 <legend className="px-2 text-sm font-black text-ink">チーム戦</legend>
                 <label className="mt-2 flex items-center gap-2 text-sm font-bold text-slate-700">
-                  <input name="teamEnabled" type="checkbox" defaultChecked className="size-4 accent-ocean-500" />
+                  <input
+                    name="teamEnabled"
+                    type="checkbox"
+                    checked={teamEnabled}
+                    onChange={(event) => setTeamEnabled(event.target.checked)}
+                    className="size-4 accent-ocean-500"
+                  />
                   チーム戦を実施する
                 </label>
-                <div className="mt-3">
-                  <CheckboxGroup name="teamAgeCategories" title="カテゴリ" options={teamAgeCategories} defaultChecked />
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {teamAgeCategories.map((category) => (
+                    <label
+                      key={category}
+                      className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-bold ${
+                        teamEnabled ? "bg-ocean-50 text-slate-700" : "bg-slate-100 text-slate-400"
+                      }`}
+                    >
+                      <input
+                        name="teamAgeCategories"
+                        value={category}
+                        type="checkbox"
+                        checked={selectedTeamAgeCategories.includes(category)}
+                        disabled={!teamEnabled}
+                        onChange={(event) => toggleTeamAgeCategory(category, event.target.checked)}
+                        className="size-4 accent-ocean-500 disabled:cursor-not-allowed"
+                      />
+                      {category}
+                    </label>
+                  ))}
                 </div>
               </fieldset>
               <fieldset className="rounded-md border border-ocean-100 p-4 sm:col-span-2">
@@ -890,7 +1008,7 @@ export default function AdminDashboard() {
                 <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
                   選択した種目だけ保存します。未入力の場合は「未入力時の定員」を使います。
                 </p>
-                <CategoryCapacityInputs />
+                <CategoryCapacityInputs activeDoublesCategories={selectedDoublesCategories} activeTeamCategories={selectedTeamCategories} />
               </fieldset>
               <label className="grid gap-2 text-sm font-bold text-slate-700 sm:col-span-2">
                 説明
@@ -1043,46 +1161,80 @@ export default function AdminDashboard() {
   );
 }
 
-function CategoryCapacityInputs() {
+function CategoryCapacityInputs({
+  activeDoublesCategories,
+  activeTeamCategories
+}: {
+  activeDoublesCategories: string[];
+  activeTeamCategories: string[];
+}) {
   const doublesCategories = doublesDivisions.flatMap((division) =>
     doublesClasses.map((className) => `${division} / ${className}`)
   );
   const teamCategories = teamAgeCategories.map((category) => `チーム戦 / ${category}`);
+  const activeDoublesCategorySet = new Set(activeDoublesCategories);
+  const activeTeamCategorySet = new Set(activeTeamCategories);
 
   return (
     <div className="mt-4 grid gap-5">
       <div>
         <p className="mb-3 text-sm font-black text-ocean-700">ダブルス</p>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {doublesCategories.map((category) => (
-            <label key={category} className="grid gap-2 rounded-md bg-ocean-50 p-3 text-sm font-bold text-slate-700">
-              {category}
-              <input
-                name={capacityInputName(category)}
-                type="number"
-                min="1"
-                defaultValue={16}
-                className="focus-ring rounded-md border border-ocean-100 px-3 py-2"
-              />
-            </label>
-          ))}
+          {doublesCategories.map((category) => {
+            const isActive = activeDoublesCategorySet.has(category);
+
+            return (
+              <label
+                key={category}
+                className={`grid gap-2 rounded-md p-3 text-sm font-bold ${
+                  isActive ? "bg-ocean-50 text-slate-700" : "bg-slate-100 text-slate-400"
+                }`}
+              >
+                <span>
+                  {category}
+                  {!isActive ? "（未選択）" : ""}
+                </span>
+                <input
+                  name={capacityInputName(category)}
+                  type="number"
+                  min="1"
+                  defaultValue={16}
+                  disabled={!isActive}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                />
+              </label>
+            );
+          })}
         </div>
       </div>
       <div>
         <p className="mb-3 text-sm font-black text-ocean-700">チーム戦</p>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {teamCategories.map((category) => (
-            <label key={category} className="grid gap-2 rounded-md bg-palm-100 p-3 text-sm font-bold text-slate-700">
-              {category}
-              <input
-                name={capacityInputName(category)}
-                type="number"
-                min="1"
-                defaultValue={8}
-                className="focus-ring rounded-md border border-ocean-100 px-3 py-2"
-              />
-            </label>
-          ))}
+          {teamCategories.map((category) => {
+            const isActive = activeTeamCategorySet.has(category);
+
+            return (
+              <label
+                key={category}
+                className={`grid gap-2 rounded-md p-3 text-sm font-bold ${
+                  isActive ? "bg-palm-100 text-slate-700" : "bg-slate-100 text-slate-400"
+                }`}
+              >
+                <span>
+                  {category}
+                  {!isActive ? "（未選択）" : ""}
+                </span>
+                <input
+                  name={capacityInputName(category)}
+                  type="number"
+                  min="1"
+                  defaultValue={8}
+                  disabled={!isActive}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                />
+              </label>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1107,32 +1259,6 @@ function AdminInput({
       {label}
       <input required={required} name={name} type={type} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder={placeholder} />
     </label>
-  );
-}
-
-function CheckboxGroup({
-  name,
-  title,
-  options,
-  defaultChecked
-}: {
-  name: string;
-  title: string;
-  options: string[];
-  defaultChecked?: boolean;
-}) {
-  return (
-    <div>
-      <p className="mb-2 text-sm font-black text-ocean-700">{title}</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {options.map((option) => (
-          <label key={option} className="flex items-center gap-2 rounded-md bg-ocean-50 px-3 py-2 text-sm font-bold text-slate-700">
-            <input name={name} value={option} type="checkbox" defaultChecked={defaultChecked} className="size-4 accent-ocean-500" />
-            {option}
-          </label>
-        ))}
-      </div>
-    </div>
   );
 }
 

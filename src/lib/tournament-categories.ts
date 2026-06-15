@@ -2,14 +2,15 @@ import type { TournamentCategoryConfig } from "@/types/domain";
 
 export const doublesDivisions = ["男子ダブルス", "女子ダブルス", "ミックスダブルス"];
 
-export const doublesClasses = ["オープン初中級者", "オープン中上級者", "35+", "50+", "65+"];
+export const doublesClasses = ["オープン", "オープン初中級者", "オープン中上級者", "35+", "50+", "65+"];
 
 export const teamAgeCategories = ["合計年齢100+", "150+", "180+", "200+"];
 
 export const defaultTournamentCategoryConfig: TournamentCategoryConfig = {
   doubles: {
     divisions: doublesDivisions,
-    classes: doublesClasses
+    classes: doublesClasses,
+    classesByDivision: Object.fromEntries(doublesDivisions.map((division) => [division, doublesClasses]))
   },
   team: {
     enabled: true,
@@ -18,9 +19,10 @@ export const defaultTournamentCategoryConfig: TournamentCategoryConfig = {
 };
 
 export function buildTournamentCategories(config: TournamentCategoryConfig) {
-  const doublesCategories = config.doubles.divisions.flatMap((division) =>
-    config.doubles.classes.map((className) => `${division} / ${className}`)
-  );
+  const doublesCategories = config.doubles.divisions.flatMap((division) => {
+    const classes = config.doubles.classesByDivision?.[division] ?? config.doubles.classes;
+    return classes.map((className) => `${division} / ${className}`);
+  });
   const teamCategories = config.team.enabled ? config.team.ageCategories.map((category) => `チーム戦 / ${category}`) : [];
   return [...doublesCategories, ...teamCategories];
 }
