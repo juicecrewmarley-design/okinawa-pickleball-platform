@@ -10,10 +10,12 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"member" | "admin">("member");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.get("verified") === "1") {
+      setMessageTone("success");
       setMessage("メール確認が完了しました。ログインしてください。");
     }
   }, []);
@@ -22,6 +24,7 @@ export default function LoginPage() {
     event.preventDefault();
     setLoading(true);
     setMessage("");
+    setMessageTone("success");
 
     const formData = new FormData(event.currentTarget);
     const email = String(formData.get("email"));
@@ -42,6 +45,7 @@ export default function LoginPage() {
       }
 
       if (mode === "admin" && result.role !== "admin") {
+        setMessageTone("error");
         setMessage("管理者権限がありません。ホームへ移動します。");
         window.location.href = "/";
         return;
@@ -50,6 +54,7 @@ export default function LoginPage() {
       setMessage("ログインしました。移動します。");
       window.location.href = mode === "admin" ? "/admin" : "/mypage";
     } catch (error) {
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "ログイン中にエラーが発生しました。");
     } finally {
       setLoading(false);
@@ -95,7 +100,15 @@ export default function LoginPage() {
             パスワード
             <input required name="password" type="password" className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="パスワード" />
           </label>
-          {message ? <p className="rounded-md bg-palm-100 px-4 py-3 text-sm font-bold text-palm-700">{message}</p> : null}
+          {message ? (
+            <p
+              className={`rounded-md px-4 py-3 text-sm font-bold ${
+                messageTone === "error" ? "bg-coral-100 text-coral-700" : "bg-palm-100 text-palm-700"
+              }`}
+            >
+              {message}
+            </p>
+          ) : null}
           <button
             disabled={loading}
             className="focus-ring inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700 disabled:opacity-60"

@@ -16,6 +16,24 @@ const cookieOptions = {
   path: "/"
 };
 
+function getLoginErrorMessage(message?: string | null) {
+  const source = message ?? "";
+
+  if (/email not confirmed/i.test(source)) {
+    return "メール確認がまだ完了していません。届いた確認メールの「メールアドレスを確認する」を押してからログインしてください。";
+  }
+
+  if (/invalid login credentials/i.test(source)) {
+    return "メールアドレスまたはパスワードが違います。確認してもう一度ログインしてください。";
+  }
+
+  if (/email rate limit|rate limit exceeded|too many requests/i.test(source)) {
+    return "確認メール送信が混み合っています。時間を空けて再度お試しください。";
+  }
+
+  return source || "ログインできませんでした。";
+}
+
 export async function POST(request: Request) {
   const config = getSupabaseServerConfig();
 
@@ -55,7 +73,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: false,
-        message: error?.message ?? "ログインできませんでした。"
+        message: getLoginErrorMessage(error?.message)
       },
       { status: 401 }
     );

@@ -220,7 +220,9 @@ Google Workspaceでは、用途によって `smtp-relay.gmail.com` を使う方�
 
 ### Supabase確認メールテンプレート日本語化
 
-Supabase Dashboardで `Authentication` → `Email Templates` を開き、`Confirm signup` を編集します。
+画像の `Confirm your email address` は、Supabase Authの初期メールテンプレートです。アプリ側のコードだけではメール本文は変わらないため、Supabase Dashboardで `Authentication` → `Email Templates` を開き、`Confirm signup` を編集します。
+
+差出人名は、Supabase Dashboardの `Authentication` → `Email` → `SMTP Settings` にある `Sender name` を `沖縄県ピックルボール協会` にします。
 
 Subject:
 
