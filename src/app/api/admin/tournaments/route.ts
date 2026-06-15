@@ -22,11 +22,13 @@ type TournamentPayload = {
 
 const tournamentSelectColumns = "id,title";
 const tournamentListColumns =
-  "id,title,description,venue,start_at,entry_deadline,member_fee_yen,guest_fee_yen,capacity,categories,status,created_at,updated_at";
+  "id,title,description,venue,start_at,entry_deadline,member_fee_yen,guest_fee_yen,capacity,categories,category_capacities,category_config,status,created_at,updated_at";
 
 type TournamentRow = {
   capacity: number | null;
   categories: string[] | null;
+  category_capacities: Record<string, number> | null;
+  category_config: Record<string, unknown> | null;
   created_at: string;
   description: string;
   entry_deadline: string | null;
@@ -118,6 +120,53 @@ function errorResponse(message: string, status: number, diagnostics: TournamentS
   );
 }
 
+function buildTournamentPayload(payload: TournamentPayload, createdBy?: string) {
+  const title = payload.title?.trim();
+  const venue = payload.venue?.trim();
+  const description = payload.description?.trim();
+  const startAt = payload.start_at?.trim();
+  const categories = toStringArray(payload.categories);
+  const categoryCapacities = toCapacityMap(payload.category_capacities);
+  const categoryConfig = payload.category_config && typeof payload.category_config === "object" ? payload.category_config : {};
+
+  if (!title || !venue || !description || !startAt) {
+    return {
+      error: "大会名、会場、開催日時、説明を入力してください。",
+      tournamentPayload: null
+    };
+  }
+
+  if (categories.length === 0) {
+    return {
+      error: "大会カテゴリを1つ以上選択してください。",
+      tournamentPayload: null
+    };
+  }
+
+  return {
+    error: null,
+    tournamentPayload: {
+      title,
+      description,
+      venue,
+      start_at: startAt,
+      entry_deadline: payload.entry_deadline || null,
+      fee_yen: toNumber(payload.fee_yen),
+      member_fee_yen: toNumber(payload.member_fee_yen),
+      guest_fee_yen: toNumber(payload.guest_fee_yen),
+      capacity: toPositiveNumber(payload.capacity),
+      categories,
+      category_capacities: categoryCapacities,
+      category_config: {
+        ...categoryConfig,
+        categoryCapacities
+      },
+      status: payload.status === "draft" ? "draft" : "open",
+      ...(createdBy ? { created_by: createdBy } : {})
+    }
+  };
+}
+
 function revalidateTournamentPages(tournamentId: string) {
   revalidatePath("/");
   revalidatePath("/tournaments");
@@ -182,6 +231,8 @@ export async function GET() {
     tournaments: ((data ?? []) as TournamentRow[]).map((tournament) => ({
       capacity: tournament.capacity ?? 0,
       categories: tournament.categories ?? [],
+      categoryCapacities: tournament.category_capacities ?? {},
+      categoryConfig: tournament.category_config ?? undefined,
       createdAt: tournament.created_at,
       description: tournament.description,
       entryDeadline: tournament.entry_deadline ?? "",
@@ -223,29 +274,13 @@ export async function POST(request: Request) {
     }
 
     const payload = (await request.json()) as TournamentPayload;
-    const title = payload.title?.trim();
-    const venue = payload.venue?.trim();
-    const description = payload.description?.trim();
-    const startAt = payload.start_at?.trim();
-    const categories = toStringArray(payload.categories);
-    const categoryCapacities = toCapacityMap(payload.category_capacities);
-    const categoryConfig = payload.category_config && typeof payload.category_config === "object" ? payload.category_config : {};
+    const builtPayload = buildTournamentPayload(payload, authResult.context.profile.id);
 
-    if (!title || !venue || !description || !startAt) {
+    if (builtPayload.error || !builtPayload.tournamentPayload) {
       return NextResponse.json(
         {
           ok: false,
-          message: "大会名、会場、開催日時、説明を入力してください。"
-        },
-        { status: 400 }
-      );
-    }
-
-    if (categories.length === 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: "大会カテゴリを1つ以上選択してください。"
+          message: builtPayload.error ?? "大会情報を確認してください。"
         },
         { status: 400 }
       );
@@ -271,25 +306,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const tournamentPayload = {
-      title,
-      description,
-      venue,
-      start_at: startAt,
-      entry_deadline: payload.entry_deadline || null,
-      fee_yen: toNumber(payload.fee_yen),
-      member_fee_yen: toNumber(payload.member_fee_yen),
-      guest_fee_yen: toNumber(payload.guest_fee_yen),
-      capacity: toPositiveNumber(payload.capacity),
-      categories,
-      category_capacities: categoryCapacities,
-      category_config: {
-        ...categoryConfig,
-        categoryCapacities
-      },
-      status: payload.status === "draft" ? "draft" : "open",
-      created_by: authResult.context.profile.id
-    };
+    const tournamentPayload = builtPayload.tournamentPayload;
 
     const { data, error } = await authResult.context.supabase
       .from("tournaments")
@@ -376,6 +393,157 @@ export async function POST(request: Request) {
       {
         ok: false,
         message: error instanceof Error ? `大会を保存できませんでした。${error.message}` : "大会保存中に予期しないエラーが発生しました。"
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const config = getSupabaseServerConfig();
+    const authResult = await getServerAuthContextWithDiagnostics();
+    const diagnostics: TournamentSaveDiagnostics = {
+      auth: authResult.diagnostics,
+      dbAdmin: null,
+      hasServiceRoleKey: Boolean(config.supabaseServiceRoleKey),
+      insertError: null,
+      insertedWith: null,
+      serviceRoleError: null
+    };
+
+    if (!authResult.context || !authResult.diagnostics.userId) {
+      return errorResponse("ログイン情報を取得できませんでした。もう一度管理者ログインしてください。", 401, diagnostics);
+    }
+
+    if (!authResult.diagnostics.profileFound) {
+      return errorResponse("ログインユーザーのプロフィールが見つかりません。profilesテーブルを確認してください。", 401, diagnostics);
+    }
+
+    if (authResult.context.profile.role !== "admin") {
+      return errorResponse("管理者権限がありません。profiles.role が admin か確認してください。", 403, diagnostics);
+    }
+
+    const tournamentId = new URL(request.url).searchParams.get("id")?.trim();
+    if (!tournamentId) {
+      return errorResponse("更新する大会IDが指定されていません。", 400, diagnostics);
+    }
+
+    const payload = (await request.json()) as TournamentPayload;
+    const builtPayload = buildTournamentPayload(payload);
+
+    if (builtPayload.error || !builtPayload.tournamentPayload) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: builtPayload.error ?? "大会情報を確認してください。"
+        },
+        { status: 400 }
+      );
+    }
+
+    const { data: dbAdmin, error: adminCheckError } = await authResult.context.supabase.rpc("is_admin");
+    diagnostics.dbAdmin = dbAdmin === true;
+
+    if (adminCheckError || dbAdmin !== true) {
+      console.error("Admin tournament update rejected by DB admin check", {
+        adminCheckError,
+        auth: diagnostics.auth,
+        dbAdmin,
+        profile: authResult.context.profile,
+        tournamentId
+      });
+
+      return errorResponse(
+        adminCheckError ? adminTournamentErrorMessage(adminCheckError) : "大会を更新できませんでした。Supabase側で管理者判定が通りませんでした。",
+        403,
+        diagnostics
+      );
+    }
+
+    const tournamentPayload = builtPayload.tournamentPayload;
+    const { data, error } = await authResult.context.supabase
+      .from("tournaments")
+      .update(tournamentPayload)
+      .eq("id", tournamentId)
+      .select(tournamentSelectColumns)
+      .maybeSingle();
+
+    if (!error && data) {
+      diagnostics.insertedWith = "rls";
+      revalidateTournamentPages(tournamentId);
+
+      return NextResponse.json({
+        diagnostics,
+        ok: true,
+        id: tournamentId,
+        message: "大会を更新しました"
+      });
+    }
+
+    if (!error && !data) {
+      return errorResponse("更新対象の大会が見つかりませんでした。", 404, diagnostics);
+    }
+
+    diagnostics.insertError = serializeSupabaseError(error);
+    console.error("Admin tournament update failed", {
+      error,
+      auth: diagnostics.auth,
+      payload: tournamentPayload,
+      profile: authResult.context.profile,
+      table: "public.tournaments",
+      tournamentId
+    });
+
+    if (config.supabaseServiceRoleKey) {
+      const serviceSupabase = createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: {
+          persistSession: false
+        }
+      });
+
+      const { data: serviceData, error: serviceError } = await serviceSupabase
+        .from("tournaments")
+        .update(tournamentPayload)
+        .eq("id", tournamentId)
+        .select(tournamentSelectColumns)
+        .maybeSingle();
+
+      if (!serviceError && serviceData) {
+        diagnostics.insertedWith = "service_role";
+        revalidateTournamentPages(tournamentId);
+
+        return NextResponse.json({
+          diagnostics,
+          ok: true,
+          id: tournamentId,
+          message: "大会を更新しました"
+        });
+      }
+
+      if (!serviceError && !serviceData) {
+        return errorResponse("更新対象の大会が見つかりませんでした。", 404, diagnostics);
+      }
+
+      diagnostics.serviceRoleError = serializeSupabaseError(serviceError);
+      console.error("Admin tournament service role update failed", {
+        error: serviceError,
+        auth: diagnostics.auth,
+        payload: tournamentPayload,
+        profile: authResult.context.profile,
+        table: "public.tournaments",
+        tournamentId
+      });
+    }
+
+    return errorResponse(adminTournamentErrorMessage(error ?? { message: "更新エラーの詳細を取得できませんでした。" }), 400, diagnostics);
+  } catch (error) {
+    console.error("Admin tournament update route crashed", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        message: error instanceof Error ? `大会を更新できませんでした。${error.message}` : "大会更新中に予期しないエラーが発生しました。"
       },
       { status: 500 }
     );

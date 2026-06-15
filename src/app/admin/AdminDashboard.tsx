@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bell, Building2, CalendarDays, CalendarPlus, ClipboardList, Download, Loader2, Medal, Save, Shield, Trash2, Trophy, Users } from "lucide-react";
+import { Bell, Building2, CalendarDays, CalendarPlus, ClipboardList, Download, Loader2, Medal, Pencil, Save, Shield, Trash2, Trophy, Users } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { singleAdminEmail } from "@/lib/admin";
 import { getMembershipLabel } from "@/lib/member";
@@ -97,6 +97,8 @@ type AdminMembersResult = {
 type AdminTournament = {
   capacity: number;
   categories: string[];
+  categoryCapacities: Record<string, number>;
+  categoryConfig?: TournamentCategoryConfig;
   createdAt: string;
   description: string;
   entryDeadline: string;
@@ -200,6 +202,15 @@ function formatDateTime(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ja-JP");
 }
 
+function toDateTimeLocalValue(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 function formatDate(value: string) {
   if (!value) return "";
   const date = new Date(value);
@@ -246,6 +257,7 @@ export default function AdminDashboard() {
   const [savingAction, setSavingAction] = useState<string | null>(null);
   const [deletingTournamentId, setDeletingTournamentId] = useState<string | null>(null);
   const [savedTournamentId, setSavedTournamentId] = useState<string | null>(null);
+  const [editingTournament, setEditingTournament] = useState<AdminTournament | null>(null);
   const [selectedDoublesClassesByDivision, setSelectedDoublesClassesByDivision] = useState<Record<string, string[]>>(() =>
     getDefaultDoublesClassesByDivision()
   );
@@ -411,10 +423,51 @@ export default function AdminDashboard() {
     setSelectedTeamAgeCategories(getDefaultTeamAgeCategories());
   }
 
-  async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string) {
+  function applyTournamentCategorySelection(tournament: AdminTournament) {
+    const config = tournament.categoryConfig;
+    const classesByDivision = Object.fromEntries(
+      doublesDivisions.map((division) => {
+        const configuredClasses = config?.doubles?.classesByDivision?.[division];
+        const fallbackClasses = tournament.categories
+          .filter((category) => category.startsWith(`${division} / `))
+          .map((category) => category.replace(`${division} / `, ""))
+          .filter((className) => doublesClasses.includes(className));
+
+        return [division, (configuredClasses ?? fallbackClasses).filter((className) => doublesClasses.includes(className))];
+      })
+    ) as Record<string, string[]>;
+    const configuredTeamCategories = config?.team?.ageCategories;
+    const fallbackTeamCategories = tournament.categories
+      .filter((category) => category.startsWith("チーム戦 / "))
+      .map((category) => category.replace("チーム戦 / ", ""))
+      .filter((category) => teamAgeCategories.includes(category));
+    const nextTeamCategories = (configuredTeamCategories ?? fallbackTeamCategories).filter((category) => teamAgeCategories.includes(category));
+
+    setSelectedDoublesClassesByDivision(classesByDivision);
+    setTeamEnabled(config?.team?.enabled ?? nextTeamCategories.length > 0);
+    setSelectedTeamAgeCategories(nextTeamCategories);
+  }
+
+  function handleTournamentEdit(tournament: AdminTournament) {
+    setEditingTournament(tournament);
+    setSavedTournamentId(null);
+    setMessageTone("success");
+    setMessage("大会編集モードです。内容を修正して「大会を更新」を押してください。");
+    applyTournamentCategorySelection(tournament);
+    document.getElementById("tournaments")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleTournamentEditCancel() {
+    setEditingTournament(null);
+    setSavedTournamentId(null);
+    setMessage("");
+    resetTournamentCategorySelection();
+  }
+
+  async function postAdminForm(endpoint: string, payload: Record<string, unknown>, fallbackMessage: string, method = "POST") {
     try {
       const response = await fetch(endpoint, {
-        method: "POST",
+        method,
         headers: {
           "Content-Type": "application/json"
         },
@@ -443,12 +496,13 @@ export default function AdminDashboard() {
 
   async function handleTournamentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     console.log("tournament save clicked");
     setMessageTone("success");
-    setMessage("保存処理を開始しました");
+    setMessage(editingTournament ? "大会更新処理を開始しました" : "保存処理を開始しました");
     setSavedTournamentId(null);
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(form);
     const title = String(formData.get("title") ?? "").trim();
     const venue = String(formData.get("venue") ?? "").trim();
     const startAt = String(formData.get("startAt") ?? "").trim();
@@ -536,13 +590,22 @@ export default function AdminDashboard() {
 
     setSavingAction("tournament");
     console.log("fetch /api/admin/tournaments");
-    const saved = await postAdminForm("/api/admin/tournaments", payload, "大会を保存しました");
+    const tournamentEndpoint = editingTournament
+      ? `/api/admin/tournaments?id=${encodeURIComponent(editingTournament.id)}`
+      : "/api/admin/tournaments";
+    const saved = await postAdminForm(
+      tournamentEndpoint,
+      payload,
+      editingTournament ? "大会を更新しました" : "大会を保存しました",
+      editingTournament ? "PATCH" : "POST"
+    );
     setSavingAction(null);
 
     if (saved) {
       setSavedTournamentId(saved.id ?? null);
       await loadAdminTournaments();
-      event.currentTarget.reset();
+      form.reset();
+      setEditingTournament(null);
       resetTournamentCategorySelection();
     }
   }
@@ -681,6 +744,10 @@ export default function AdminDashboard() {
       setMessageTone("success");
       setMessage(result.message ?? "大会を削除しました。");
       await loadAdminTournaments();
+      if (editingTournament?.id === tournament.id) {
+        setEditingTournament(null);
+        resetTournamentCategorySelection();
+      }
     } catch (error) {
       console.error("Admin tournament delete failed", {
         error,
@@ -845,7 +912,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[1080px] text-left text-sm">
+            <table className="w-full min-w-[1180px] text-left text-sm">
               <thead className="bg-ocean-50 text-xs uppercase tracking-[0.16em] text-ocean-700">
                 <tr>
                   <th className="px-4 py-3">年度</th>
@@ -859,25 +926,26 @@ export default function AdminDashboard() {
                   <th className="px-4 py-3">プレミアム会員</th>
                   <th className="px-4 py-3">定員</th>
                   <th className="px-4 py-3">カテゴリ</th>
+                  <th className="px-4 py-3">編集</th>
                   <th className="px-4 py-3">削除</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ocean-50">
                 {adminTournamentsLoading ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={12}>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={13}>
                       大会一覧を読み込み中です。
                     </td>
                   </tr>
                 ) : adminTournamentsError ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={12}>
+                    <td className="px-4 py-5 font-bold text-coral-700" colSpan={13}>
                       {adminTournamentsError}
                     </td>
                   </tr>
                 ) : filteredAdminTournaments.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={12}>
+                    <td className="px-4 py-5 font-bold text-slate-600" colSpan={13}>
                       選択した条件の大会はまだありません。
                     </td>
                   </tr>
@@ -906,6 +974,16 @@ export default function AdminDashboard() {
                       <td className="px-4 py-4">
                         <button
                           type="button"
+                          onClick={() => handleTournamentEdit(tournament)}
+                          className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-ocean-50 px-3 py-2 text-xs font-black text-ocean-700 transition hover:bg-ocean-500 hover:text-white"
+                        >
+                          <Pencil className="size-4" aria-hidden="true" />
+                          編集
+                        </button>
+                      </td>
+                      <td className="px-4 py-4">
+                        <button
+                          type="button"
                           onClick={() => handleTournamentDelete(tournament)}
                           disabled={deletingTournamentId === tournament.id}
                           className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-coral-100 px-3 py-2 text-xs font-black text-coral-700 transition hover:bg-coral-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -927,19 +1005,35 @@ export default function AdminDashboard() {
         </section>
 
         <section id="tournaments" className="scroll-mt-28 rounded-lg border border-ocean-100 bg-white p-5 shadow-soft sm:p-6">
-          <form noValidate onSubmit={handleTournamentSubmit}>
-            <h2 className="text-2xl font-black">大会作成</h2>
+          <form key={editingTournament?.id ?? "new-tournament"} noValidate onSubmit={handleTournamentSubmit}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-black">{editingTournament ? "大会編集" : "大会作成"}</h2>
+                {editingTournament ? (
+                  <p className="mt-1 text-sm font-bold text-ocean-700">編集中: {editingTournament.title}</p>
+                ) : null}
+              </div>
+              {editingTournament ? (
+                <button
+                  type="button"
+                  onClick={handleTournamentEditCancel}
+                  className="focus-ring rounded-md border border-ocean-100 px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-ocean-50"
+                >
+                  新規作成に戻る
+                </button>
+              ) : null}
+            </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <AdminInput name="title" label="大会名" placeholder="沖縄オープン 2026" required />
-              <AdminInput name="venue" label="会場" placeholder="沖縄県総合運動公園" required />
-              <AdminInput name="startAt" label="開催日時" type="datetime-local" required />
-              <AdminInput name="entryDeadline" label="申込締切" type="datetime-local" required />
-              <AdminInput name="memberFeeYen" label="一般会員参加料" type="number" placeholder="3000" required />
-              <AdminInput name="guestFeeYen" label="プレミアム会員参加料" type="number" placeholder="2000" required />
-              <AdminInput name="defaultCapacity" label="未入力時の定員" type="number" placeholder="16" required />
+              <AdminInput name="title" label="大会名" placeholder="沖縄オープン 2026" defaultValue={editingTournament?.title ?? ""} required />
+              <AdminInput name="venue" label="会場" placeholder="沖縄県総合運動公園" defaultValue={editingTournament?.venue ?? ""} required />
+              <AdminInput name="startAt" label="開催日時" type="datetime-local" defaultValue={toDateTimeLocalValue(editingTournament?.startAt ?? "")} required />
+              <AdminInput name="entryDeadline" label="申込締切" type="datetime-local" defaultValue={toDateTimeLocalValue(editingTournament?.entryDeadline ?? "")} required />
+              <AdminInput name="memberFeeYen" label="一般会員参加料" type="number" placeholder="3000" defaultValue={editingTournament?.memberFeeYen ?? ""} required />
+              <AdminInput name="guestFeeYen" label="プレミアム会員参加料" type="number" placeholder="2000" defaultValue={editingTournament?.guestFeeYen ?? ""} required />
+              <AdminInput name="defaultCapacity" label="未入力時の定員" type="number" placeholder="16" defaultValue={editingTournament?.capacity || 16} required />
               <label className="grid gap-2 text-sm font-bold text-slate-700">
                 公開状態
-                <select name="status" defaultValue="open" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+                <select name="status" defaultValue={editingTournament?.status === "draft" ? "draft" : "open"} className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
                   <option value="open">公開</option>
                   <option value="draft">未公開</option>
                 </select>
@@ -1008,14 +1102,25 @@ export default function AdminDashboard() {
                 <p className="mt-2 text-sm font-bold leading-6 text-slate-600">
                   選択した種目だけ保存します。未入力の場合は「未入力時の定員」を使います。
                 </p>
-                <CategoryCapacityInputs activeDoublesCategories={selectedDoublesCategories} activeTeamCategories={selectedTeamCategories} />
+                <CategoryCapacityInputs
+                  activeDoublesCategories={selectedDoublesCategories}
+                  activeTeamCategories={selectedTeamCategories}
+                  categoryCapacities={editingTournament?.categoryCapacities}
+                />
               </fieldset>
               <label className="grid gap-2 text-sm font-bold text-slate-700 sm:col-span-2">
                 説明
-                <textarea required name="description" rows={4} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder="大会概要、対象者、持ち物など" />
+                <textarea
+                  required
+                  name="description"
+                  rows={4}
+                  defaultValue={editingTournament?.description ?? ""}
+                  className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+                  placeholder="大会概要、対象者、持ち物など"
+                />
               </label>
             </div>
-            <SaveButton label="大会を保存" loading={savingAction === "tournament"} />
+            <SaveButton label={editingTournament ? "大会を更新" : "大会を保存"} loading={savingAction === "tournament"} />
           </form>
         </section>
 
@@ -1163,10 +1268,12 @@ export default function AdminDashboard() {
 
 function CategoryCapacityInputs({
   activeDoublesCategories,
-  activeTeamCategories
+  activeTeamCategories,
+  categoryCapacities = {}
 }: {
   activeDoublesCategories: string[];
   activeTeamCategories: string[];
+  categoryCapacities?: Record<string, number>;
 }) {
   const doublesCategories = doublesDivisions.flatMap((division) =>
     doublesClasses.map((className) => `${division} / ${className}`)
@@ -1198,7 +1305,7 @@ function CategoryCapacityInputs({
                   name={capacityInputName(category)}
                   type="number"
                   min="1"
-                  defaultValue={16}
+                  defaultValue={categoryCapacities[category] ?? 16}
                   disabled={!isActive}
                   className="focus-ring rounded-md border border-ocean-100 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
                 />
@@ -1228,7 +1335,7 @@ function CategoryCapacityInputs({
                   name={capacityInputName(category)}
                   type="number"
                   min="1"
-                  defaultValue={8}
+                  defaultValue={categoryCapacities[category] ?? 8}
                   disabled={!isActive}
                   className="focus-ring rounded-md border border-ocean-100 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
                 />
@@ -1242,12 +1349,14 @@ function CategoryCapacityInputs({
 }
 
 function AdminInput({
+  defaultValue,
   label,
   name,
   type = "text",
   placeholder,
   required
 }: {
+  defaultValue?: string | number;
   label: string;
   name: string;
   type?: string;
@@ -1257,7 +1366,14 @@ function AdminInput({
   return (
     <label className="grid gap-2 text-sm font-bold text-slate-700">
       {label}
-      <input required={required} name={name} type={type} className="focus-ring rounded-md border border-ocean-100 px-3 py-3" placeholder={placeholder} />
+      <input
+        required={required}
+        name={name}
+        type={type}
+        defaultValue={defaultValue}
+        className="focus-ring rounded-md border border-ocean-100 px-3 py-3"
+        placeholder={placeholder}
+      />
     </label>
   );
 }

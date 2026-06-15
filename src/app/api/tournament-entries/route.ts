@@ -42,6 +42,14 @@ type SupabaseErrorLike = {
   message?: string;
 };
 
+type ExistingEntryRow = {
+  applicant_member_id: string | null;
+  entry_type: EntryType | null;
+  id: string;
+  partner_member_id: string | null;
+  team_members: { memberId?: string | null; name?: string | null }[] | null;
+};
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -221,6 +229,79 @@ async function findReciprocalEntry({
   return data?.[0]?.id ? String(data[0].id) : null;
 }
 
+async function findEntriesInCategory({
+  category,
+  supabase,
+  tournamentId
+}: {
+  category: string;
+  supabase: SupabaseClient;
+  tournamentId: string;
+}) {
+  const { data, error } = await supabase
+    .from("tournament_entries")
+    .select("id,entry_type,applicant_member_id,partner_member_id,team_members")
+    .eq("tournament_id", tournamentId)
+    .eq("category", category)
+    .neq("status", "cancelled");
+
+  if (error) throw error;
+
+  return (data ?? []) as ExistingEntryRow[];
+}
+
+function entryMemberIds(entry: ExistingEntryRow) {
+  const ids = new Set<string>();
+  if (entry.applicant_member_id) ids.add(normalizeMemberId(entry.applicant_member_id));
+  if (entry.partner_member_id) ids.add(normalizeMemberId(entry.partner_member_id));
+
+  if (Array.isArray(entry.team_members)) {
+    entry.team_members.forEach((member) => {
+      if (member.memberId) ids.add(normalizeMemberId(member.memberId));
+    });
+  }
+
+  ids.delete("");
+  return ids;
+}
+
+function findDuplicateMemberIds({
+  applicantMemberId,
+  candidateMemberIds,
+  entries,
+  entryType,
+  partnerMemberId
+}: {
+  applicantMemberId?: string | null;
+  candidateMemberIds: string[];
+  entries: ExistingEntryRow[];
+  entryType: EntryType;
+  partnerMemberId?: string | null;
+}) {
+  const normalizedCandidates = candidateMemberIds.map(normalizeMemberId).filter(Boolean);
+  const duplicates = new Set<string>();
+  const normalizedApplicant = normalizeMemberId(applicantMemberId);
+  const normalizedPartner = normalizeMemberId(partnerMemberId);
+
+  entries.forEach((entry) => {
+    const isReciprocalDoublesEntry =
+      entryType === "doubles" &&
+      normalizedApplicant &&
+      normalizedPartner &&
+      normalizeMemberId(entry.applicant_member_id) === normalizedPartner &&
+      normalizeMemberId(entry.partner_member_id) === normalizedApplicant;
+
+    if (isReciprocalDoublesEntry) return;
+
+    const existingIds = entryMemberIds(entry);
+    normalizedCandidates.forEach((memberId) => {
+      if (existingIds.has(memberId)) duplicates.add(memberId);
+    });
+  });
+
+  return Array.from(duplicates);
+}
+
 export async function POST(request: Request) {
   const currentUrl = request.headers.get("referer") ?? request.url;
   const config = getSupabaseServerConfig();
@@ -276,7 +357,7 @@ export async function POST(request: Request) {
 
   const { data: tournament, error: tournamentError } = await supabase
     .from("tournaments")
-    .select("id,status,title,member_fee_yen,guest_fee_yen,categories")
+    .select("id,status,title,member_fee_yen,guest_fee_yen,capacity,categories,category_capacities")
     .eq("id", receivedTournamentId)
     .maybeSingle();
 
@@ -434,6 +515,11 @@ export async function POST(request: Request) {
           )
         : [];
 
+    const existingEntries = await findEntriesInCategory({
+      category: entryCategory,
+      supabase,
+      tournamentId: receivedTournamentId
+    });
     const reciprocalEntryId =
       entryType === "doubles" && applicantMember && partnerMember
         ? await findReciprocalEntry({
@@ -444,6 +530,56 @@ export async function POST(request: Request) {
             tournamentId: receivedTournamentId
           })
         : null;
+    const candidateMemberIds = [
+      applicantType === "member" ? applicantMember?.member_id ?? compact(payload.applicantMemberId) : "",
+      entryType === "doubles" ? partnerMember?.member_id ?? compact(payload.partnerMemberId) : "",
+      ...teamMembers.map((member) => member.memberId)
+    ].filter(Boolean) as string[];
+    const duplicateMemberIds = findDuplicateMemberIds({
+      applicantMemberId: applicantMember?.member_id ?? compact(payload.applicantMemberId),
+      candidateMemberIds,
+      entries: existingEntries,
+      entryType,
+      partnerMemberId: partnerMember?.member_id ?? compact(payload.partnerMemberId)
+    });
+
+    if (duplicateMemberIds.length > 0) {
+      return NextResponse.json(
+        {
+          ...buildDiagnostics({
+            ...baseDiagnostics,
+            tournamentLookupData: tournament
+          }),
+          duplicateMemberIds,
+          ok: false,
+          message: `同じ大会カテゴリに同じ会員IDが既にエントリーされています。会員ID: ${duplicateMemberIds.join("、")}`
+        },
+        { status: 400 }
+      );
+    }
+
+    const categoryCapacities =
+      tournament.category_capacities && typeof tournament.category_capacities === "object" && !Array.isArray(tournament.category_capacities)
+        ? (tournament.category_capacities as Record<string, number>)
+        : {};
+    const categoryCapacity = Number(categoryCapacities[entryCategory] ?? tournament.capacity ?? 0);
+
+    if (!reciprocalEntryId && categoryCapacity > 0 && existingEntries.length >= categoryCapacity) {
+      return NextResponse.json(
+        {
+          ...buildDiagnostics({
+            ...baseDiagnostics,
+            tournamentLookupData: tournament
+          }),
+          currentEntryCount: existingEntries.length,
+          entryCapacity: categoryCapacity,
+          ok: false,
+          message: "このカテゴリは定員に達したため、エントリーできません。"
+        },
+        { status: 400 }
+      );
+    }
+
     const isLinked =
       entryType === "doubles"
         ? Boolean(reciprocalEntryId)
