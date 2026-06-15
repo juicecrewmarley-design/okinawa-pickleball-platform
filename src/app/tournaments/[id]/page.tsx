@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEventHandler, FocusEventHandler, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEventHandler, FocusEventHandler, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AlertCircle, CalendarDays, CheckCircle2, Loader2, MapPin, Trophy, Users } from "lucide-react";
@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { formatYen, getMembershipLabel } from "@/lib/member";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { defaultTournamentCategoryConfig, getCategoryCapacity, sumCategoryCapacities } from "@/lib/tournament-categories";
-import type { MemberProfile, MembershipType, PaymentMethod, Tournament } from "@/types/domain";
+import type { MemberProfile, MembershipType, PaymentMethod, Tournament, TournamentCategoryConfig } from "@/types/domain";
 
 type EntryType = "doubles" | "team";
 
@@ -88,6 +88,39 @@ function formatEntryResultMessage(result: EntryApiResult, entryFeeYen: number, p
   }
 
   return `エントリーを保存しました。ペアの申込がまだ揃っていないため、現在は待機中です。ペア側も同じ大会・カテゴリであなたの会員IDを入力すると完了になります。参加料は${formatYen(entryFeeYen)}、支払い方法は${paymentLabel}です。`;
+}
+
+function isTeamCategory(category: string) {
+  return category.startsWith("チーム戦 /");
+}
+
+function getDoublesCategories(tournament: Tournament | null, categoryConfig: TournamentCategoryConfig) {
+  const tournamentCategories = tournament?.categories ?? [];
+  const savedCategories = tournamentCategories.filter((category) => !isTeamCategory(category));
+  if (tournamentCategories.length > 0) return savedCategories;
+  if (savedCategories.length > 0) return savedCategories;
+
+  return (categoryConfig.doubles?.divisions ?? []).flatMap((division) => {
+    const classes = categoryConfig.doubles?.classesByDivision?.[division] ?? categoryConfig.doubles?.classes ?? [];
+    return classes.map((className) => `${division} / ${className}`);
+  });
+}
+
+function getTeamCategories(tournament: Tournament | null, categoryConfig: TournamentCategoryConfig) {
+  const tournamentCategories = tournament?.categories ?? [];
+  const savedCategories = tournamentCategories.filter(isTeamCategory);
+  if (tournamentCategories.length > 0) return savedCategories;
+  if (savedCategories.length > 0) return savedCategories;
+
+  return categoryConfig.team?.enabled ? (categoryConfig.team.ageCategories ?? []).map((category) => `チーム戦 / ${category}`) : [];
+}
+
+function parseCategory(category: string) {
+  const [division = "", classOrAgeCategory = ""] = category.split(" / ");
+  return {
+    classOrAgeCategory,
+    division
+  };
 }
 
 export default function TournamentDetailPage() {
@@ -195,6 +228,21 @@ export default function TournamentDetailPage() {
   const membershipType: MembershipType = currentMember?.membershipType ?? "general";
   const entryFeeYen = membershipType === "premium" ? premiumFeeYen : generalFeeYen;
   const isSupabaseTournamentId = tournament ? isUuid(tournament.id) : false;
+  const availableDoublesCategories = useMemo(() => getDoublesCategories(tournament, categoryConfig), [categoryConfig, tournament]);
+  const availableTeamCategories = useMemo(() => getTeamCategories(tournament, categoryConfig), [categoryConfig, tournament]);
+  const canEnterDoubles = availableDoublesCategories.length > 0;
+  const canEnterTeam = availableTeamCategories.length > 0;
+
+  useEffect(() => {
+    if (entryType === "team" && !canEnterTeam && canEnterDoubles) {
+      setEntryType("doubles");
+      return;
+    }
+
+    if (entryType === "doubles" && !canEnterDoubles && canEnterTeam) {
+      setEntryType("team");
+    }
+  }, [canEnterDoubles, canEnterTeam, entryType]);
 
   const lookupPartner = useCallback(async (memberId: string) => {
     const trimmedMemberId = memberId.trim();
@@ -257,9 +305,10 @@ export default function TournamentDetailPage() {
 
     const formData = new FormData(event.currentTarget);
     const teamName = String(formData.get("teamName") ?? "").trim();
-    const division = String(formData.get("division") ?? "");
-    const doublesClass = String(formData.get("doublesClass") ?? "");
-    const teamAgeCategory = String(formData.get("teamAgeCategory") ?? "");
+    const selectedCategory = String(formData.get(entryType === "doubles" ? "doublesCategory" : "teamCategory") ?? "").trim();
+    const parsedCategory = parseCategory(selectedCategory);
+    const division = entryType === "doubles" ? parsedCategory.division : "チーム戦";
+    const classOrAgeCategory = parsedCategory.classOrAgeCategory;
     const submittedPartnerMemberId = partnerMemberId.trim();
     const submittedPartnerName = partnerName.trim();
     const submittedPaymentMethod = paymentMethod;
@@ -268,13 +317,16 @@ export default function TournamentDetailPage() {
       name: String(formData.get(`teamMember${index}Name`) ?? "").trim()
     }));
 
-    const category = entryType === "doubles" ? `${division} / ${doublesClass}` : `チーム戦 / ${teamAgeCategory}`;
+    const category = selectedCategory;
     const entryLabel = entryType === "team" && teamName ? `${category} / ${teamName}` : category;
 
     const missingFields = [
       !currentMember.memberId ? "申込者の会員ID" : "",
+      !category ? "エントリーカテゴリ" : "",
+      entryType === "doubles" && !canEnterDoubles ? "開催中のダブルスカテゴリ" : "",
       entryType === "doubles" && !submittedPartnerMemberId ? "ペアの会員ID" : "",
       entryType === "doubles" && !submittedPartnerName ? "ペアの氏名確認" : "",
+      entryType === "team" && !canEnterTeam ? "開催中のチーム戦カテゴリ" : "",
       entryType === "team" && !teamName ? "チーム名" : "",
       entryType === "team" && teamMembers.some((member) => !member.memberId && !member.name)
         ? "メンバー2〜4の会員IDまたは氏名"
@@ -310,8 +362,8 @@ export default function TournamentDetailPage() {
           applicantPhone: currentMember.phone,
           applicantType: "member",
           category,
-          classOrAgeCategory: entryType === "doubles" ? doublesClass : teamAgeCategory,
-          division: entryType === "doubles" ? division : "チーム戦",
+          classOrAgeCategory,
+          division,
           entryFeeYen,
           entryType,
           pairOrTeamName: entryType === "team" ? teamName : null,
@@ -504,38 +556,46 @@ export default function TournamentDetailPage() {
             )}
 
             <div className="mb-4 grid grid-cols-2 gap-2 rounded-md bg-ocean-50 p-1">
-              {(["doubles", "team"] as EntryType[]).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setEntryType(type)}
-                  className={`focus-ring rounded-md px-3 py-3 text-sm font-black ${
-                    entryType === type ? "bg-white text-ink shadow" : "text-slate-600"
-                  }`}
-                >
-                  {type === "doubles" ? "ダブルス" : "チーム戦"}
-                </button>
-              ))}
+              {(["doubles", "team"] as EntryType[]).map((type) => {
+                const disabled = type === "doubles" ? !canEnterDoubles : !canEnterTeam;
+
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (!disabled) setEntryType(type);
+                    }}
+                    className={`focus-ring rounded-md px-3 py-3 text-sm font-black ${
+                      entryType === type && !disabled
+                        ? "bg-white text-ink shadow"
+                        : disabled
+                          ? "cursor-not-allowed bg-slate-100 text-slate-400"
+                          : "text-slate-600"
+                    }`}
+                  >
+                    {type === "doubles" ? "ダブルス" : "チーム戦"}
+                    {disabled ? "（開催なし）" : ""}
+                  </button>
+                );
+              })}
             </div>
+
+            {!canEnterDoubles && !canEnterTeam ? (
+              <div className="mb-4 rounded-md bg-coral-100 px-4 py-3 text-sm font-bold leading-6 text-coral-700">
+                この大会はエントリー可能なカテゴリが設定されていません。管理者に確認してください。
+              </div>
+            ) : null}
 
             {entryType === "doubles" ? (
               <div className="grid gap-4">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  選択枠
-                  <select required name="division" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
-                    {categoryConfig.doubles.divisions.map((division) => (
-                      <option key={division} value={division}>
-                        {division}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-2 text-sm font-bold text-slate-700">
-                  カテゴリ
-                  <select required name="doublesClass" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
-                    {categoryConfig.doubles.classes.map((className) => (
-                      <option key={className} value={className}>
-                        {className}
+                  ダブルスカテゴリ
+                  <select required name="doublesCategory" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+                    {availableDoublesCategories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
                       </option>
                     ))}
                   </select>
@@ -562,10 +622,10 @@ export default function TournamentDetailPage() {
               <div className="grid gap-4">
                 <label className="grid gap-2 text-sm font-bold text-slate-700">
                   チーム戦カテゴリ
-                  <select required name="teamAgeCategory" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
-                    {categoryConfig.team.ageCategories.map((category) => (
+                  <select required name="teamCategory" className="focus-ring rounded-md border border-ocean-100 px-3 py-3">
+                    {availableTeamCategories.map((category) => (
                       <option key={category} value={category}>
-                        {category}
+                        {category.replace("チーム戦 / ", "")}
                       </option>
                     ))}
                   </select>
@@ -613,7 +673,7 @@ export default function TournamentDetailPage() {
               </p>
             ) : null}
             <button
-              disabled={loading || tournament.status !== "open" || !currentMember}
+              disabled={loading || tournament.status !== "open" || !currentMember || (!canEnterDoubles && !canEnterTeam)}
               className="focus-ring mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-5 py-3 font-black text-white transition hover:bg-ocean-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? <Loader2 className="size-5 animate-spin" aria-hidden="true" /> : <CheckCircle2 className="size-5" aria-hidden="true" />}

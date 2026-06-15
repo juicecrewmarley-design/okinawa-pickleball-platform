@@ -57,6 +57,10 @@ function normalizePaymentMethod(value?: PaymentMethod | null): PaymentMethod {
   return value === "paypay" ? "paypay" : "cash";
 }
 
+function isTeamEntryCategory(category: string) {
+  return category.startsWith("チーム戦 /");
+}
+
 function buildDiagnostics({
   currentUrl,
   hasServiceRoleKey,
@@ -272,7 +276,7 @@ export async function POST(request: Request) {
 
   const { data: tournament, error: tournamentError } = await supabase
     .from("tournaments")
-    .select("id,status,title,member_fee_yen,guest_fee_yen")
+    .select("id,status,title,member_fee_yen,guest_fee_yen,categories")
     .eq("id", receivedTournamentId)
     .maybeSingle();
 
@@ -312,6 +316,25 @@ export async function POST(request: Request) {
   try {
     const applicantType: ApplicantType = payload.applicantType === "guest" ? "guest" : "member";
     const entryType: EntryType = payload.entryType === "team" ? "team" : "doubles";
+    const entryCategory = compact(payload.category);
+    const tournamentCategories = Array.isArray(tournament.categories) ? tournament.categories.map(String).filter(Boolean) : [];
+    const categoryExists = tournamentCategories.includes(entryCategory);
+    const categoryMatchesEntryType = entryType === "team" ? isTeamEntryCategory(entryCategory) : !isTeamEntryCategory(entryCategory);
+
+    if (!entryCategory || !categoryExists || !categoryMatchesEntryType) {
+      return NextResponse.json(
+        {
+          ...buildDiagnostics({
+            ...baseDiagnostics,
+            tournamentLookupData: tournament
+          }),
+          ok: false,
+          message: "この大会では選択したカテゴリは開催されていません。大会で開催されるカテゴリから選択してください。"
+        },
+        { status: 400 }
+      );
+    }
+
     const applicantMember = applicantType === "member" ? await findMember(supabase, payload.applicantMemberId) : null;
     const applicantMembershipType = normalizeMembershipType(
       applicantMember?.membership_type ?? payload.applicantMembershipType,
@@ -411,7 +434,6 @@ export async function POST(request: Request) {
           )
         : [];
 
-    const entryCategory = compact(payload.category);
     const reciprocalEntryId =
       entryType === "doubles" && applicantMember && partnerMember
         ? await findReciprocalEntry({
