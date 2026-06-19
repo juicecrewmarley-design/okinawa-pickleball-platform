@@ -419,7 +419,7 @@ export default function RegisterPage() {
             </div>
           ) : (
             <div className="mb-5 rounded-lg border border-palm-200 bg-palm-100 p-4 text-sm font-bold leading-7 text-palm-700">
-              OKP-0001〜OKP-0209の既存会員は、自動的にプレミアム会員として登録されます。
+              OKP-0001〜OKP-0215の既存会員は、自動的にプレミアム会員として登録されます。
             </div>
           )}
           {registrationMode === "legacy" ? (

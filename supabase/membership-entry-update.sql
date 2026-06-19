@@ -37,7 +37,7 @@ select setval(
 update public.profiles
 set membership_type = 'premium'
 where member_id ~ '^OKP-[0-9]+$'
-  and substring(member_id from '^OKP-([0-9]+)$')::bigint between 1 and 209;
+  and substring(member_id from '^OKP-([0-9]+)$')::bigint between 1 and 215;
 
 create or replace function public.upsert_profile_from_auth_user(
   auth_user_id uuid,
@@ -126,7 +126,7 @@ begin
   final_municipality := coalesce(legacy_match.municipality, nullif(auth_raw_user_meta_data ->> 'municipality', ''));
   final_member_number := nullif(substring(final_member_id from '^OKP-([0-9]+)$'), '')::bigint;
   final_membership_type := case
-    when final_member_number between 1 and 209 then 'premium'::public.membership_type
+    when final_member_number between 1 and 215 then 'premium'::public.membership_type
     when legacy_match.member_id is not null then 'premium'::public.membership_type
     when auth_raw_user_meta_data ->> 'membership_type' = 'premium' then 'premium'::public.membership_type
     else 'general'::public.membership_type
@@ -174,7 +174,7 @@ begin
     municipality = coalesce(public.profiles.municipality, excluded.municipality),
     membership_type = case
       when public.profiles.member_id ~ '^OKP-[0-9]+$'
-        and substring(public.profiles.member_id from '^OKP-([0-9]+)$')::bigint between 1 and 209
+        and substring(public.profiles.member_id from '^OKP-([0-9]+)$')::bigint between 1 and 215
       then 'premium'::public.membership_type
       else coalesce(public.profiles.membership_type, excluded.membership_type)
     end,

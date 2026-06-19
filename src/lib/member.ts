@@ -27,7 +27,7 @@ export function getMemberNumber(memberId: string) {
 
 export function isLegacyPremiumMemberId(memberId: string) {
   const memberNumber = getMemberNumber(memberId);
-  return memberNumber !== null && memberNumber >= 1 && memberNumber <= 209;
+  return memberNumber !== null && memberNumber >= 1 && memberNumber <= 215;
 }
 
 export function normalizeMembershipType(value?: string | null, memberId = ""): MembershipType {
