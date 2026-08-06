@@ -357,9 +357,9 @@ export default function MyPage() {
 
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-3">
-            <StatCard label="OPR" value={String(member.opr)} note="年間ランキング対象ポイント" icon={<Trophy className="size-5" aria-hidden="true" />} />
-            <StatCard label="Rank" value={member.ranking ? `${member.ranking}位` : "-"} note="総合ランキング順位" icon={<UserRound className="size-5" aria-hidden="true" />} />
-            <StatCard label="Entries" value={String(entries.length)} note="現在の大会エントリー" icon={<CalendarCheck className="size-5" aria-hidden="true" />} />
+            <StatCard label="OPR" value="-" note="年間ランキング対象ポイント" icon={<Trophy className="size-5" aria-hidden="true" />} />
+            <StatCard label="Rank" value="-" note="総合ランキング順位" icon={<UserRound className="size-5" aria-hidden="true" />} />
+            <StatCard label="Entries" value="-" note="現在の大会エントリー" icon={<CalendarCheck className="size-5" aria-hidden="true" />} />
           </div>
 
           <section className="rounded-lg border border-ocean-100 bg-white p-5 shadow-soft">
@@ -416,9 +416,9 @@ export default function MyPage() {
             <h2 className="text-xl font-black">OPRポイント内訳</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {[
-                ["参加", 120],
-                ["勝利", 780],
-                ["順位", 360]
+                ["参加", "-"],
+                ["勝利", "-"],
+                ["順位", "-"]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-md bg-palm-100 p-4">
                   <p className="text-sm font-bold text-palm-700">{label}ポイント</p>

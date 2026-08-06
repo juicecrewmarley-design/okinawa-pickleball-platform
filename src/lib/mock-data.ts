@@ -37,8 +37,8 @@ export const mockMember: MemberProfile = {
   municipality: "那覇市",
   role: "member",
   membershipType: "premium",
-  opr: 1280,
-  ranking: 12
+  opr: 0,
+  ranking: 0
 };
 
 export const tournaments: Tournament[] = [
